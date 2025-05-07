@@ -121,6 +121,18 @@ my_logs/
 ```
 Each call to .log(message, target=...) writes to the stream you specify.
 
+You can define as many log streams as needed or just a single one.
+
+Example:
+```python
+LogConfig(
+    log_streams=["app"],
+    mirror_map={}
+)
+```
+This will create a single `app.log` file per interval.
+Mirroring is optional, and is not required when using only one stream.
+
 ---
 
 ## Mirroring
