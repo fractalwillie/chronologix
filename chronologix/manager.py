@@ -4,7 +4,7 @@ import asyncio
 import atexit
 from typing import List
 from datetime import datetime
-from chronologix.config import LogConfig
+from chronologix.config import LogConfig, LOG_LEVELS
 from chronologix.state import LogState
 from chronologix.rollover import RolloverScheduler
 from chronologix.io import prepare_directory, async_write
@@ -24,6 +24,10 @@ class LogManager:
         self._scheduler = RolloverScheduler(config, self._state)
         self._lock = asyncio.Lock()
         self._pending_tasks: List[asyncio.Task] = []
+        self._level_thresholds = {
+            stream: LOG_LEVELS[level]
+            for stream, level in self._config.min_log_levels.items()
+        }
         self._started = False
         atexit.register(self._on_exit) # register exit handler
 
@@ -50,24 +54,48 @@ class LogManager:
         self._scheduler.start()
         self._started = True
 
-    async def log(self, message: str, target: str) -> None:
-        """Write a timestamped log message to the target stream and its mirrors."""
+    async def log(self, message: str, target: str, level: str = None) -> None:
+        """Write a timestamped log message to the target stream and its mirrors.
+           If `min_log_levels` is configured, this function will skip writing to streams
+           where the provided log `level` is below the configured threshold.
+        """
         if not self._started:
             raise RuntimeError("LogManager has not been started yet. Call `await start()` first.")
+
+        if level and level not in LOG_LEVELS:
+            raise ValueError(f"Invalid log level: '{level}'. Must be one of: {list(LOG_LEVELS)}")
 
         all_paths = self._state.get_all_resolved_paths()
 
         if target not in all_paths:
             raise ValueError(f"Unknown log stream target: '{target}'")
 
-        async with self._lock:
-            timestamp = datetime.now().strftime(self._config.timestamp_format) # format timestamp once per log call using config
+        level_value = LOG_LEVELS[level] if level else None
 
-            formatted_msg = f"[{timestamp}] {message}\n"
-            tasks = [
-                asyncio.create_task(async_write(path, formatted_msg))
-                for path in all_paths[target]
-            ]
+        # check if source stream accepts level
+        if target in self._level_thresholds:
+            threshold = self._level_thresholds[target]
+            if level_value is None or level_value < threshold:
+                return  # skip, don't write or mirror
+
+        async with self._lock:
+            timestamp = datetime.now().strftime(self._config.timestamp_format)
+            tasks = []
+
+            for stream_id, path in all_paths[target]:
+                # Check stream threshold (based on stream_id)
+                if stream_id in self._level_thresholds:
+                    if level_value is None or level_value < self._level_thresholds[stream_id]:
+                        continue
+
+                formatted_msg = (
+                    f"[{timestamp}] [{level}] {message}\n"
+                    if level else
+                    f"[{timestamp}] {message}\n"
+                )
+
+                tasks.append(asyncio.create_task(async_write(path, formatted_msg)))
+                
             self._pending_tasks.extend(tasks)
             self._pending_tasks = [t for t in self._pending_tasks if not t.done()] # remove completed tasks to avoid memory buildup
             await asyncio.gather(*tasks)

@@ -1,7 +1,7 @@
 # state.py
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 class LogState:
@@ -14,18 +14,18 @@ class LogState:
         """Initialize stream and mirror mapping. Holds current active log paths."""
         self._log_streams = set(log_streams)
         self._mirror_map = mirror_map
-        self._stream_to_paths: Dict[str, List[Path]] = {}
+        self._stream_to_paths: Dict[str, List[Tuple[str, Path]]] = {}
 
     def update_active_paths(self, path_map: Dict[str, Path]) -> None:
         """Set active paths for each stream and mirror target using new path map."""
         self._stream_to_paths.clear() # reset active mapping before applying updated paths
 
         for stream in self._log_streams:
-            paths: List[Path] = []
+            entries: List[Tuple[str, Path]] = []
 
             # always include stream's own log path
             if stream in path_map:
-                paths.append(path_map[stream])
+                entries.append((stream, path_map[stream])) 
 
             # if stream is source of mirroring, add all mirror targets
             if stream in self._mirror_map:
@@ -34,10 +34,10 @@ class LogState:
                         raise ValueError(
                             f"Mirror target '{mirror_target}' not in active path map"
                         )
-                    paths.append(path_map[mirror_target])
+                    entries.append((mirror_target, path_map[mirror_target]))
 
-            if paths:
-                self._stream_to_paths[stream] = paths
+            if entries:
+                self._stream_to_paths[stream] = entries
 
     def get_all_resolved_paths(self) -> Dict[str, List[Path]]:
         """Return copy of current stream → file path lists."""

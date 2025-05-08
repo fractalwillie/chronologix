@@ -6,13 +6,11 @@ from pathlib import Path
 from typing import List, Dict, Union
 
 # custom exceptions
-
 class LogConfigError(Exception):
     """Raised when Chronologix config is invalid."""
 
 
 # interval config mapping
-
 INTERVAL_CONFIG = {
     "24h":  {"timedelta": timedelta(hours=24), "folder_format": "%Y-%m-%d"},
     "12h":  {"timedelta": timedelta(hours=12), "folder_format": "%Y-%m-%d__%H-%M"},
@@ -25,19 +23,29 @@ INTERVAL_CONFIG = {
 }
 
 # valid directives for strftime()
-
 DIRECTIVE_CONFIG = {
             "%H", "%I", "%M", "%S", "%f", "%p", "%z", "%Z", "%j", "%U", "%W",
             "%d", "%m", "%y", "%Y", "%a", "%A", "%b", "%B"
         }
 
-# Chronologix config
+# log levels hierarchy
+LOG_LEVELS = {
+    "TRACE": 5,
+    "DEBUG": 10,
+    "INFO": 20,
+    "WARNING": 30,
+    "ERROR": 40,
+    "CRITICAL": 50
+}
 
+
+# Chronologix config
 @dataclass(frozen=True)
 class LogConfig:
     base_log_dir: Union[str, Path] = "logs"
     interval: str = "24h"
     log_streams: List[str] = field(default_factory=lambda: ["all", "errors"])
+    min_log_levels: Dict[str, str] = field(default_factory=dict)
     mirror_map: Dict[str, List[str]] = field(default_factory=lambda: {"errors": ["all"]})
     timestamp_format: str = "%H:%M:%S"
 
@@ -45,6 +53,7 @@ class LogConfig:
     interval_timedelta: timedelta = field(init=False)
     folder_format: str = field(init=False)
     resolved_base_path: Path = field(init=False)
+    level_thresholds: Dict[str, int] = field(init=False)
 
     def __post_init__(self):
         """Validate & compute derived config fields (base_log_dir, interval, log_streams, mirror_map, timestamp_format, interval_timedelta, folder_format, resolved_base_path)"""
@@ -71,6 +80,18 @@ class LogConfig:
             raise LogConfigError(
                 f"Mirror map has invalid target streams: {broken}"
             )
+
+        # validate min_log_levels if present
+        for stream, level in self.min_log_levels.items():
+            if stream not in self.log_streams:
+                raise LogConfigError(f"min_log_levels key '{stream}' is not in log_streams")
+            if level not in LOG_LEVELS:
+                raise LogConfigError(f"Invalid log level '{level}' for stream '{stream}'")
+
+        object.__setattr__(self, "level_thresholds", {
+            stream: LOG_LEVELS[level]
+            for stream, level in self.min_log_levels.items()
+        })
 
         # check for presence of at least one known strftime directive in timestamp_format
         if not any(code in self.timestamp_format for code in DIRECTIVE_CONFIG):

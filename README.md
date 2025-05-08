@@ -141,10 +141,82 @@ Mirroring can be configured like this:
 ```python
 mirror_map = {
     "errors": ["app"],    # messages logged to "errors" will mirror to "app"
-    "debug":  ["all"]
+    "debug":  ["all"]     # # messages logged to "debug" will mirror to "all"
 }
 ```
 Mirroring is optional. Any stream can exist without mirrors, and mirrors can point to multiple targets.
+
+### Flat mirroring only
+Mirroring is one-level deep by design.
+A message logged to "trace" and mirrored to "debug" will not be re-mirrored from "debug" to another stream.
+This avoids complex logic, recursive loops, and keeps the output clean.
+
+---
+
+## Log Levels
+
+Chronologix supports configurable log level thresholds for each stream.
+This allows you to filter out lower-priority messages from specific log files.
+
+### Hierarchy
+Levels are evaluated by their severity:
+```python
+LOG_LEVELS = {
+    "TRACE": 5,    # most verbose
+    "DEBUG": 10,
+    "INFO": 20,
+    "WARNING": 30,
+    "ERROR": 40,
+    "CRITICAL": 50 # most severe
+}
+```
+Each stream only logs messages with severity greater than or equal to its configured threshold.
+
+Example:
+```python
+log_streams=["stdout", "errors", "debug"],
+min_log_levels={
+    "stdout": "INFO",     # logs INFO, WARNING, ERROR, CRITICAL
+    "errors": "ERROR",    # logs ERROR, CRITICAL
+    "debug": "DEBUG",     # logs DEBUG, INFO, WARNING, ERROR, CRITICAL
+}
+```
+If a message is below a stream's threshold, it will be skipped.
+
+This also applies to mirrored logs.
+A message will only be mirrored to a stream if that stream accepts its level.
+
+### Optional usage
+- Log levels are fully optional.
+- If no level is passed to .log(...), the message will still be written to any stream that does not have a threshold.
+
+Messages without levels are logged like:
+```lua
+[14:02:19] Something went wrong
+```
+While messages with levels include:
+```lua
+[14:02:19] [ERROR] Something went wrong
+
+```
+
+#### Why no `NOTSET`?
+Unlike some logging systems, Chronologix does not include `NOTSET`.
+I decided to go with `TRACE` as the lowest level instead.
+It allows for the log() function to be invoked without level argument and ignore the log levels completely.
+
+### Using Chronologix without log levels
+If you don’t want log level filtering simply skip `min_log_levels` and use the default config.
+Or only define thresholds for select streams.
+
+Example:
+```python
+log_streams=["stdout", "audit"],
+min_log_levels={"stdout": "INFO"}
+
+await logger.log("Something happened", target="stdout", level="WARNING")
+await logger.log("Just some note", target="audit")  # no level, still works
+```
 
 ---
 
