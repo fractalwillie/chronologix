@@ -12,6 +12,7 @@ It writes structured log files across multiple named streams, supports time-base
 -  Time-based rollover (e.g. every 24h, 1h, 15min)
 -  Log stream isolation (e.g. `errors`, `debug`, `events`)
 -  Configurable mirror streams (`errors` → `debug`)
+-  Optional per-stream log level filtering (`INFO`, `ERROR`, etc.)
 -  Safe, stateless async file writes
 -  Config validation with clear error feedback
 -  Custom log paths via `str` or `pathlib.Path`
@@ -39,6 +40,7 @@ config = LogConfig(
     interval="1h",                          # rollover interval
     log_streams=["app", "errors", "audit"], # named log streams
     mirror_map={"errors": ["app"]},         # errors are mirrored into "app"
+    min_log_levels={"app": "INFO", "errors": "ERROR"}, # logs filtered by level
     timestamp_format="%H:%M:%S.%f"          # timestamp format
 )
 
@@ -47,14 +49,14 @@ logger = LogManager(config)
 async def divide(a, b):
     try:
         result = a / b
-        await logger.log(f"Division result: {result}", target="app")
+        await logger.log(f"Division result: {result}", target="app", level="INFO")
     except Exception as e:
-        await logger.log(f"Exception occurred: {e}", target="errors")
+        await logger.log(f"Exception occurred: {e}", target="errors", level="ERROR")
 
 async def main():
     await logger.start()
-    await logger.log("Starting batch job", target="app")
-    await logger.log("Auditing step 1", target="audit")
+    await logger.log("Starting batch job", target="app", level="INFO")
+    await logger.log("Auditing step 1", target="audit") # called without "level" since "audit" isn't set in min_log_levels
     await divide(10, 0)  # this will raise and log to both "errors" and "app"
     await logger.stop()
 
@@ -63,7 +65,8 @@ This example will produce following:
 - A new folder per hour like: 2025-05-04__14-00/
 - Three log files inside: app.log, errors.log, audit.log
 - The exception will be logged to both errors.log and app.log
-- The audit message will only go to audit.log with no mirroring
+- The log level filtering will be applied only to "app" and "errors" streams
+- The audit message will only go to audit.log with no mirroring nor log level filtering
 
 ---
 
@@ -270,6 +273,7 @@ LogConfig(
     interval="24h",
     log_streams=["all", "errors"],
     mirror_map={"errors": ["all"]},
+    min_log_levels={},
     timestamp_format="%H:%M:%S"
 )
 ```
