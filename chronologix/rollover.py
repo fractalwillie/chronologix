@@ -25,25 +25,33 @@ class RolloverScheduler:
         """Infinite loop that prepares new log directories and updates paths on interval."""
         try:
             while True:
+                # calculate the current and next chunk times, determine how long to sleep
                 now = datetime.now()
                 interval_delta = self._config.interval_timedelta
                 current_chunk_start = get_current_chunk_start(now, interval_delta)
                 next_chunk_start = current_chunk_start + interval_delta
                 sleep_duration = (next_chunk_start - now).total_seconds()
 
-                # prepare current and next folder
+                # prepare dirs for current and next intervals
                 current_folder = current_chunk_start.strftime(self._config.folder_format)
                 next_folder = next_chunk_start.strftime(self._config.folder_format)
 
-                current_map = prepare_directory(
-                    self._config.resolved_base_path, current_folder, self._config.log_streams
-                )
-                next_map = prepare_directory(
-                    self._config.resolved_base_path, next_folder, self._config.log_streams
-                )
+                # collect all unique files to be prepared (sinks + mirror)
+                all_files = {p.name for p in self._config.sink_files.values()}
+                if self._config.mirror_file:
+                    all_files.add(self._config.mirror_file.name)
 
-                # set the active paths (only for current)
-                self._state.update_active_paths(current_map)
+                # prepare dirs
+                current_map = prepare_directory(self._config.resolved_base_path, current_folder, all_files)
+                prepare_directory(self._config.resolved_base_path, next_folder, all_files)
+
+                # update internal state with current paths + level routing
+                self._state.update_active_paths(
+                    sink_paths={name: current_map[path.name] for name, path in self._config.sink_files.items()},
+                    mirror_path=current_map.get(self._config.mirror_file.name) if self._config.mirror_file else None,
+                    sink_levels=self._config.sink_levels,
+                    mirror_threshold=self._config.mirror_threshold
+                )
 
                 # sleep until rollover
                 await asyncio.sleep(sleep_duration)

@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta, datetime
 from pathlib import Path
-from typing import List, Dict, Union
+from typing import Dict, Union, Optional, Any
 
 # custom exceptions
 class LogConfigError(Exception):
@@ -24,13 +24,13 @@ INTERVAL_CONFIG = {
 
 # valid directives for strftime()
 DIRECTIVE_CONFIG = {
-            "%H", "%I", "%M", "%S", "%f", "%p", "%z", "%Z", "%j", "%U", "%W",
-            "%d", "%m", "%y", "%Y", "%a", "%A", "%b", "%B"
-        }
+    "%H", "%I", "%M", "%S", "%f", "%p", "%z", "%Z", "%j", "%U", "%W",
+    "%d", "%m", "%y", "%Y", "%a", "%A", "%b", "%B"
+}
 
-# log levels hierarchy
+# log level hierarchy
 LOG_LEVELS = {
-    "TRACE": 5,
+    "NOTSET": 0,
     "DEBUG": 10,
     "INFO": 20,
     "WARNING": 30,
@@ -38,74 +38,48 @@ LOG_LEVELS = {
     "CRITICAL": 50
 }
 
-
 # Chronologix config
 @dataclass(frozen=True)
 class LogConfig:
     base_log_dir: Union[str, Path] = "logs"
     interval: str = "24h"
-    log_streams: List[str] = field(default_factory=lambda: ["all", "errors"])
-    min_log_levels: Dict[str, str] = field(default_factory=dict)
-    mirror_map: Dict[str, List[str]] = field(default_factory=lambda: {"errors": ["all"]})
+    sinks: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
+        "debug": {"file": "debug.log", "min_level": "NOTSET"},
+        "errors": {"file": "errors.log", "min_level": "ERROR"}
+    })
+    mirror: Optional[Dict[str, str]] = None
     timestamp_format: str = "%H:%M:%S"
 
-    # derived fields (set during validation)
+    # derived fields
     interval_timedelta: timedelta = field(init=False)
     folder_format: str = field(init=False)
     resolved_base_path: Path = field(init=False)
-    level_thresholds: Dict[str, int] = field(init=False)
+    sink_levels: Dict[str, int] = field(init=False)
+    sink_files: Dict[str, Path] = field(init=False)
+    mirror_file: Optional[Path] = field(init=False)
+    mirror_threshold: Optional[int] = field(init=False)
 
     def __post_init__(self):
-        """Validate & compute derived config fields (base_log_dir, interval, log_streams, mirror_map, timestamp_format, interval_timedelta, folder_format, resolved_base_path)"""
-        # validate interval
+        """Validate & compute derived config fields"""
+
+        # validate that the interval is known and map it to its duration and folder naming format
         if self.interval not in INTERVAL_CONFIG:
-            raise LogConfigError(
-                f"Invalid interval: '{self.interval}'. "
-                f"Must be one of: {list(INTERVAL_CONFIG.keys())}"
-            )
+            raise LogConfigError(f"Invalid interval: '{self.interval}'. Must be one of: {list(INTERVAL_CONFIG.keys())}")
 
-        # validate mirror_map keys and targets
-        invalid_keys = [k for k in self.mirror_map if k not in self.log_streams]
-        invalid_targets = [
-            (k, t) for k, targets in self.mirror_map.items()
-            for t in targets if t not in self.log_streams
-        ]
+        config = INTERVAL_CONFIG[self.interval]
+        object.__setattr__(self, "interval_timedelta", config["timedelta"])
+        object.__setattr__(self, "folder_format", config["folder_format"])
 
-        if invalid_keys:
-            raise LogConfigError(
-                f"Mirror map references undefined log streams: {invalid_keys}"
-            )
-        if invalid_targets:
-            broken = ", ".join(f"{k} → {t}" for k, t in invalid_targets)
-            raise LogConfigError(
-                f"Mirror map has invalid target streams: {broken}"
-            )
-
-        # validate min_log_levels if present
-        for stream, level in self.min_log_levels.items():
-            if stream not in self.log_streams:
-                raise LogConfigError(f"min_log_levels key '{stream}' is not in log_streams")
-            if level not in LOG_LEVELS:
-                raise LogConfigError(f"Invalid log level '{level}' for stream '{stream}'")
-
-        object.__setattr__(self, "level_thresholds", {
-            stream: LOG_LEVELS[level]
-            for stream, level in self.min_log_levels.items()
-        })
-
-        # check for presence of at least one known strftime directive in timestamp_format
+        # validate that timestamp format includes at least one valid directive and can be used by strftime
         if not any(code in self.timestamp_format for code in DIRECTIVE_CONFIG):
-            raise LogConfigError(
-                f"Invalid timestamp_format: '{self.timestamp_format}'. "
-                f"Must contain at least one valid strftime directive like %H, %M, %S (e.g. %H:%M:%S for HH:MM:SS)"
-            )
-        # verbose error for invalid timestamp_format string
+            raise LogConfigError(f"Invalid timestamp_format: '{self.timestamp_format}'. Must contain at least one valid strftime directive.")
+
         try:
             datetime.now().strftime(self.timestamp_format)
         except Exception as e:
             raise LogConfigError(f"Invalid timestamp_format: {self.timestamp_format} — {e}")
-        
-        # resolve/create and validate base_log_dir
+
+        # validate that the base directory exists and is a valid path
         try:
             base = Path(self.base_log_dir).expanduser().resolve()
             base.mkdir(parents=True, exist_ok=True)
@@ -113,7 +87,36 @@ class LogConfig:
             raise LogConfigError(f"Could not resolve or create base_log_dir: {e}")
         object.__setattr__(self, "resolved_base_path", base)
 
-        # set derived interval properties
-        config = INTERVAL_CONFIG[self.interval]
-        object.__setattr__(self, "interval_timedelta", config["timedelta"])
-        object.__setattr__(self, "folder_format", config["folder_format"])
+        # resolve sink paths and log levels from user config
+        # validate each sink config (must include 'file' and 'min_level')
+        resolved_sink_levels = {}
+        resolved_sink_paths = {}
+
+        for sink_name, cfg in self.sinks.items():
+            if "file" not in cfg or "min_level" not in cfg:
+                raise LogConfigError(f"Sink '{sink_name}' must have both 'file' and 'min_level' keys.")
+            level = cfg["min_level"].upper()
+            if level not in LOG_LEVELS:
+                raise LogConfigError(f"Invalid min_level '{level}' in sink '{sink_name}'. Must be one of {list(LOG_LEVELS.keys())}")
+            path = base / cfg["file"]
+            resolved_sink_levels[sink_name] = LOG_LEVELS[level]
+            resolved_sink_paths[sink_name] = path
+
+        object.__setattr__(self, "sink_levels", resolved_sink_levels)
+        object.__setattr__(self, "sink_files", resolved_sink_paths)
+
+        # validate optional mirror config, resolve file and threshold level if provided
+        if self.mirror is not None:
+            if not isinstance(self.mirror, dict):
+                raise LogConfigError("Mirror must be a dictionary with 'file' and optional 'min_level'.")
+            if "file" not in self.mirror:
+                raise LogConfigError("Mirror config must contain a 'file' key.")
+            mirror_file = base / self.mirror["file"]
+            mirror_level = self.mirror.get("min_level", "NOTSET").upper()
+            if mirror_level not in LOG_LEVELS:
+                raise LogConfigError(f"Invalid mirror min_level: '{mirror_level}'")
+            object.__setattr__(self, "mirror_file", mirror_file)
+            object.__setattr__(self, "mirror_threshold", LOG_LEVELS[mirror_level])
+        else:
+            object.__setattr__(self, "mirror_file", None)
+            object.__setattr__(self, "mirror_threshold", None)

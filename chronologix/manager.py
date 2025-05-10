@@ -2,7 +2,7 @@
 
 import asyncio
 import atexit
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from chronologix.config import LogConfig, LOG_LEVELS
 from chronologix.state import LogState
@@ -18,87 +18,85 @@ class LogManager:
     """
 
     def __init__(self, config: LogConfig):
-        """Initialize core components: config, state, scheduler, locks, shutdown hook."""
+        """Initialize config, state, scheduler, lock, and register shutdown hook."""
         self._config = config
-        self._state = LogState(config.log_streams, config.mirror_map)
+        self._state = LogState()
         self._scheduler = RolloverScheduler(config, self._state)
         self._lock = asyncio.Lock()
         self._pending_tasks: List[asyncio.Task] = []
-        self._level_thresholds = {
-            stream: LOG_LEVELS[level]
-            for stream, level in self._config.min_log_levels.items()
-        }
         self._started = False
+
         atexit.register(self._on_exit) # register exit handler
 
     async def start(self) -> None:
         """Initialize current log directory, update state, and start rollover loop."""
         if self._started:
             return
-        
-        # compute current time chunk and next rollover point
+
+        # determine the current chunk (log folder) name based on interval alignment
         now = datetime.now()
         interval_delta = self._config.interval_timedelta
-        current_chunk_start = get_current_chunk_start(now, interval_delta)
-        chunk_name = current_chunk_start.strftime(self._config.folder_format)
+        chunk_name = get_current_chunk_start(now, interval_delta).strftime(self._config.folder_format)
 
+        # collect unique filenames across all sinks (and optional mirror) to prepare directory
+        all_files = {p.name for p in self._config.sink_files.values()}
+        if self._config.mirror_file:
+            all_files.add(self._config.mirror_file.name)
 
-        # prepare current + next interval dirs
-        current_map = prepare_directory(
-            self._config.resolved_base_path,
-            chunk_name,
-            self._config.log_streams
+        # prepare the current log directory and create all required files
+        current_map = prepare_directory(self._config.resolved_base_path, chunk_name, all_files)
+
+        # register file paths and levels into shared log state
+        self._state.update_active_paths(
+            sink_paths={name: current_map[path.name] for name, path in self._config.sink_files.items()},
+            mirror_path=current_map.get(self._config.mirror_file.name) if self._config.mirror_file else None,
+            sink_levels=self._config.sink_levels,
+            mirror_threshold=self._config.mirror_threshold
         )
 
-        self._state.update_active_paths(current_map)
         self._scheduler.start()
         self._started = True
 
-    async def log(self, message: str, target: str, level: str = None) -> None:
-        """Write a timestamped log message to the target stream and its mirrors.
-           If `min_log_levels` is configured, this function will skip writing to streams
-           where the provided log `level` is below the configured threshold.
+    async def log(self, message: str, level: Optional[str] = None) -> None:
+        """
+        Write a timestamped log message to all sinks (and mirror) that accept the level.
+        If level is omitted, 'NOTSET' is used by default.
         """
         if not self._started:
             raise RuntimeError("LogManager has not been started yet. Call `await start()` first.")
 
-        if level and level not in LOG_LEVELS:
+        # normalize level and validate
+        level = (level or "NOTSET").upper()
+        if level not in LOG_LEVELS:
             raise ValueError(f"Invalid log level: '{level}'. Must be one of: {list(LOG_LEVELS)}")
 
-        all_paths = self._state.get_all_resolved_paths()
+        timestamp = datetime.now().strftime(self._config.timestamp_format)
+        formatted_msg = f"[{timestamp}] [{level}] {message}\n"
 
-        if target not in all_paths:
-            raise ValueError(f"Unknown log stream target: '{target}'")
+        # determine which log files should receive this message based on level routing
+        paths = self._state.get_paths_for_level(level)
 
-        level_value = LOG_LEVELS[level] if level else None
-
-        # check if source stream accepts level
-        if target in self._level_thresholds:
-            threshold = self._level_thresholds[target]
-            if level_value is None or level_value < threshold:
-                return  # skip, don't write or mirror
-
+        # async handler with mutex to prevent concurrent writes to the same file
+        # create and track async write tasks for all matching sinks
         async with self._lock:
-            timestamp = datetime.now().strftime(self._config.timestamp_format)
-            tasks = []
-
-            for stream_id, path in all_paths[target]:
-                # Check stream threshold (based on stream_id)
-                if stream_id in self._level_thresholds:
-                    if level_value is None or level_value < self._level_thresholds[stream_id]:
-                        continue
-
-                formatted_msg = (
-                    f"[{timestamp}] [{level}] {message}\n"
-                    if level else
-                    f"[{timestamp}] {message}\n"
-                )
-
-                tasks.append(asyncio.create_task(async_write(path, formatted_msg)))
-                
+            tasks = [asyncio.create_task(async_write(p, formatted_msg)) for p in paths]
             self._pending_tasks.extend(tasks)
             self._pending_tasks = [t for t in self._pending_tasks if not t.done()] # remove completed tasks to avoid memory buildup
             await asyncio.gather(*tasks)
+
+    def __getattr__(self, level_name: str):
+        """
+        Allow logger.error("msg") style calls
+        Maps attribute access to log-level-aware logging
+        """
+        level_name = level_name.upper()
+        if level_name not in LOG_LEVELS:
+            raise AttributeError(f"'LogManager' object has no attribute '{level_name}'")
+
+        async def level_logger(msg: str) -> None:
+            await self.log(msg, level=level_name)
+
+        return level_logger
 
     async def stop(self) -> None:
         """Stop rollover loop and flush all pending async writes."""

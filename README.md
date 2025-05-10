@@ -2,28 +2,28 @@
 
 Chronologix is a fully asynchronous, modular logging system for Python.
 
-It writes structured log files across multiple named streams, supports time-based chunking, and avoids the standard logging module completely.
+It writes structured log files across multiple named sinks, supports time-based chunking, and avoids the standard logging module completely.
 
 ---
 
 ## Features
 
 -  Fully async logging 
--  Time-based rollover (e.g. every 24h, 1h, 15min)
--  Log stream isolation (e.g. `errors`, `debug`, `events`)
--  Configurable mirror streams (`errors` → `debug`)
--  Optional per-stream log level filtering (`INFO`, `ERROR`, etc.)
--  Safe, stateless async file writes
+-  Time-based rollover (e.g. every `24h`, `1h`, `15m`)
+-  Multiple independent log sinks with custom filters
+-  Optional mirror sink that records everything above set threshold
+-  Log level filtering per sink (`DEBUG`, `ERROR`, etc.)
+-  Safe file I/O with atomic disk writes
 -  Config validation with clear error feedback
 -  Custom log paths via `str` or `pathlib.Path`
 -  Predictable file and folder structure for automated processing
+-  No logging module, no global state
 
 ---
 
 ## Installation
 
 Chronologix requires **Python 3.7+**.
-
 ```bash
 pip install chronologix
 ```
@@ -33,15 +33,21 @@ pip install chronologix
 ## Usage example
 
 ```python
+import asyncio
 from chronologix import LogConfig, LogManager
 
 config = LogConfig(
-    base_log_dir="my_logs",                 # can also be a pathlib.Path
-    interval="1h",                          # rollover interval
-    log_streams=["app", "errors", "audit"], # named log streams
-    mirror_map={"errors": ["app"]},         # errors are mirrored into "app"
-    min_log_levels={"app": "INFO", "errors": "ERROR"}, # logs filtered by level
-    timestamp_format="%H:%M:%S.%f"          # timestamp format
+    base_log_dir="my_logs",
+    interval="1h",  # rollover every hour
+    sinks={
+        "app": {"file": "app.log", "min_level": "INFO"},
+        "errors": {"file": "errors.log", "min_level": "ERROR"},
+    },
+    mirror={
+        "file": "audit.log",  # captures all messages regardless of sink
+        "min_level": "NOTSET" # min_level for mirror is optional, defaults to NOTSET without it
+    },
+    timestamp_format="%H:%M:%S.%f"
 )
 
 logger = LogManager(config)
@@ -49,24 +55,30 @@ logger = LogManager(config)
 async def divide(a, b):
     try:
         result = a / b
-        await logger.log(f"Division result: {result}", target="app", level="INFO")
+        await logger.log(f"Division result: {result}", level="INFO")  # level passed as argument, goes to app + mirror
     except Exception as e:
-        await logger.log(f"Exception occurred: {e}", target="errors", level="ERROR")
+        await logger.error(f"Exception occurred: {e}")  # wrapper method - .error normalized to ERROR min_level, goes to errors + app + mirror
 
+# showcase of several different methods of logging
 async def main():
-    await logger.start()
-    await logger.log("Starting batch job", target="app", level="INFO")
-    await logger.log("Auditing step 1", target="audit") # called without "level" since "audit" isn't set in min_log_levels
-    await divide(10, 0)  # this will raise and log to both "errors" and "app"
+    await logger.start() # needs to be called before any logging happens
+    await logger.log("Some NOTSET level msg")  # defaults to NOTSET, goes to mirror only
+    await logger.debug("Some DEBUG level msg")  # goes to mirror only (app min_level = INFO)
+    await logger.info("Some INFO level msg")  # app + mirror
+    await logger.warning("Some WARNING level msg")  # app + mirror
+    await logger.error("Some ERROR level msg")  # errors + app + mirror
+    await logger.CRITICAL("Some CRITICAL level msg")  # errors + app + mirror (upper/lowercase doesn't matter, they're normalized before processing)
+    await divide(10, 0)  # triggers zero division error → errors + mirror
     await logger.stop()
+
 
 ```
 This example will produce following:
-- A new folder per hour like: 2025-05-04__14-00/
-- Three log files inside: app.log, errors.log, audit.log
-- The exception will be logged to both errors.log and app.log
-- The log level filtering will be applied only to "app" and "errors" streams
-- The audit message will only go to audit.log with no mirroring nor log level filtering
+- Two new folder per hour like: 2025-05-04__14-00/ and 2025-05-04__15-00/
+- Three log files inside each: app.log (INFO and above), errors.log (ERROR and above), audit.log (NOTSET)
+- The exception will be logged to both sinks and mirror
+- Messages without level (like "Some NOTSET level msg") will be treated as NOTSET and only land in sinks that accept that level (here: audit.log mirror file)
+- Level filtering and routing is automatic. You don’t specify a target sink, only a level (or nothing)
 
 ---
 
@@ -98,127 +110,86 @@ Supported values:
 - `"15m"`
 - `"5m"`
 
-Each interval corresponds to a different granularity of time-based chunking.
-- `interval="24h"` → folders like `2025-05-04/`
-- `interval="1h"` → folders like `2025-05-04__14-00/`
+Each interval corresponds to a different granularity of time-based chunking:
+- `interval="24h"` → folders like `2025-05-04/` → `2025-05-05/`
+- `interval="1h"` → folders like `2025-05-04__14-00/` → `2025-05-04__15-00/`
 
 ---
 
-## Log streams
+## Sinks
 
-Log streams define the named `.log` files Chronologix will manage.
-
-Each stream corresponds to a separate log file inside each time-based folder.
-
-Example:
-```python
-log_streams=["app", "errors", "audit"]
-```
-This would create:
-```lua
-my_logs/
-└── 2025-05-04/
-    ├── app.log
-    ├── errors.log
-    └── audit.log
-```
-Each call to .log(message, target=...) writes to the stream you specify.
-
-You can define as many log streams as needed or just a single one.
+Each sink is defined by:
+- a `file` name (relative to the chunk folder)
+- a `min_level` that controls what gets written
 
 Example:
 ```python
-LogConfig(
-    log_streams=["app"],
-    mirror_map={}
-)
+sinks={
+    "debug":  {"file": "debug.log", "min_level": "NOTSET"},
+    "alerts": {"file": "alerts.log", "min_level": "CRITICAL"},
+}
 ```
-This will create a single `app.log` file per interval.
-Mirroring is optional, and is not required when using only one stream.
+A single message may be written to multiple sinks if its level qualifies.
+You can define as many sinks as needed or just a single one.
 
 ---
 
 ## Mirroring
 
-Mirroring can be configured like this:
+You can configure an optional mirror file to capture all logs that match or exceed a threshold:
 ```python
-mirror_map = {
-    "errors": ["app"],    # messages logged to "errors" will mirror to "app"
-    "debug":  ["all"]     # # messages logged to "debug" will mirror to "all"
+mirror = {
+    "file": "all.log",
+    "min_level": "DEBUG"  # optional, defaults to "NOTSET"
 }
 ```
-Mirroring is optional. Any stream can exist without mirrors, and mirrors can point to multiple targets.
-
-### Flat mirroring only
-Mirroring is one-level deep by design.
-A message logged to "trace" and mirrored to "debug" will not be re-mirrored from "debug" to another stream.
-This avoids complex logic, recursive loops, and keeps the output clean.
+This is useful for debugging, auditing, or fallback catch-all logging.
+The `mirror` is limited to a single file.
 
 ---
 
 ## Log Levels
 
-Chronologix supports configurable log level thresholds for each stream.
+Chronologix supports configurable log level thresholds for each sink and a single mirror.
 This allows you to filter out lower-priority messages from specific log files.
 
 ### Hierarchy
+
 Levels are evaluated by their severity:
 ```python
 LOG_LEVELS = {
-    "TRACE": 5,    # most verbose
+    "NOTSET": 0,
     "DEBUG": 10,
     "INFO": 20,
     "WARNING": 30,
     "ERROR": 40,
-    "CRITICAL": 50 # most severe
+    "CRITICAL": 50 
 }
 ```
-Each stream only logs messages with severity greater than or equal to its configured threshold.
+- You can use `.log("msg", level="WARNING")` or `.warning("msg")`.
+- Levels are automatically routed to all eligible sinks.
+- If no level is given, NOTSET is assumed.
 
 Example:
 ```python
-log_streams=["stdout", "errors", "debug"],
-min_log_levels={
-    "stdout": "INFO",     # logs INFO, WARNING, ERROR, CRITICAL
-    "errors": "ERROR",    # logs ERROR, CRITICAL
-    "debug": "DEBUG",     # logs DEBUG, INFO, WARNING, ERROR, CRITICAL
-}
+logger = LogManager(config)
+await logger.start()
+await logger.log("msg") # NOTSET
+await logger.log("msg", level="INFO") # INFO
+await logger.error("msg") # ERROR
+await logger.DEBUG("msg") # DEBUG
 ```
-If a message is below a stream's threshold, it will be skipped.
-
-This also applies to mirrored logs.
-A message will only be mirrored to a stream if that stream accepts its level.
-
-### Optional usage
-- Log levels are fully optional.
-- If no level is passed to .log(...), the message will still be written to any stream that does not have a threshold.
-
-Messages without levels are logged like:
-```lua
-[14:02:19] Something went wrong
-```
-While messages with levels include:
-```lua
-[14:02:19] [ERROR] Something went wrong
-
-```
-
-#### Why no `NOTSET`?
-Unlike some logging systems, Chronologix does not include `NOTSET`.
-I decided to go with `TRACE` as the lowest level instead.
-It allows for the log() function to be invoked without level argument and ignore the log levels completely.
 
 ### Using Chronologix without log levels
-If you don’t want log level filtering simply skip `min_log_levels` and use the default config.
-Or only define thresholds for select streams.
+If you don’t want log level filtering simply set your sink's `min_level` to `NOTSET`.
 
 Example:
 ```python
-log_streams=["stdout", "audit"],
-min_log_levels={"stdout": "INFO"}
+sinks={
+    "logging":  {"file": "logging.log", "min_level": "NOTSET"},
+}
 
-await logger.log("Something happened", target="stdout", level="WARNING")
-await logger.log("Just some note", target="audit")  # no level, still works
+await logger.log("Something happened") # if no level is provided .log defaults to NOTSET
 ```
 
 ---
@@ -266,14 +237,16 @@ config = LogConfig()
 logger = LogManager(config)
 await logger.start()
 ```
-Which is equivalent to:
+`LogConfig()` is equivalent to:
 ```python
 LogConfig(
     base_log_dir="logs",
     interval="24h",
-    log_streams=["all", "errors"],
-    mirror_map={"errors": ["all"]},
-    min_log_levels={},
+    sinks={
+        "debug": {"file": "debug.log", "min_level": "NOTSET"},
+        "errors": {"file": "errors.log", "min_level": "ERROR"}
+    }
+    mirror=None,
     timestamp_format="%H:%M:%S"
 )
 ```

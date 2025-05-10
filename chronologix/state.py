@@ -1,44 +1,60 @@
 # state.py
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional
+from chronologix.config import LOG_LEVELS
 
 
 class LogState:
     """
-    Holds the active log path mapping for each stream, including mirroring.
+    Holds the resolved file path mapping for sinks and mirror.
     Used as the single source of truth across rollover and write operations.
     """
 
-    def __init__(self, log_streams: List[str], mirror_map: Dict[str, List[str]]):
-        """Initialize stream and mirror mapping. Holds current active log paths."""
-        self._log_streams = set(log_streams)
-        self._mirror_map = mirror_map
-        self._stream_to_paths: Dict[str, List[Tuple[str, Path]]] = {}
+    def __init__(self):
+        # individual sink paths, set fresh on each rollover
+        self._sink_paths: Dict[str, Path] = {}
 
-    def update_active_paths(self, path_map: Dict[str, Path]) -> None:
-        """Set active paths for each stream and mirror target using new path map."""
-        self._stream_to_paths.clear() # reset active mapping before applying updated paths
+        # optional mirror path
+        self._mirror_path: Optional[Path] = None
 
-        for stream in self._log_streams:
-            entries: List[Tuple[str, Path]] = []
+        # precomputed level → list of paths
+        self._paths_by_level: Dict[str, List[Path]] = {}
 
-            # always include stream's own log path
-            if stream in path_map:
-                entries.append((stream, path_map[stream])) 
+    def update_active_paths(
+        self,
+        sink_paths: Dict[str, Path],
+        mirror_path: Optional[Path],
+        sink_levels: Dict[str, int],
+        mirror_threshold: Optional[int]
+    ) -> None:
+        """
+        Set active paths for all sinks and optional mirror,
+        and precompute level-based path dispatch map.
+        """
+        self._sink_paths = sink_paths
+        self._mirror_path = mirror_path
+        self._paths_by_level.clear()
 
-            # if stream is source of mirroring, add all mirror targets
-            if stream in self._mirror_map:
-                for mirror_target in self._mirror_map[stream]:
-                    if mirror_target not in path_map:
-                        raise ValueError(
-                            f"Mirror target '{mirror_target}' not in active path map"
-                        )
-                    entries.append((mirror_target, path_map[mirror_target]))
+        # for each log level, build the list of files that should receive logs of that level
+        for level_name, level_value in LOG_LEVELS.items():
+            paths: List[Path] = []
 
-            if entries:
-                self._stream_to_paths[stream] = entries
+            for sink_name, min_level in sink_levels.items():
+                if level_value >= min_level: # sink is eligible for this level, add its path
+                    path = sink_paths.get(sink_name)
+                    if path:
+                        paths.append(path)
 
-    def get_all_resolved_paths(self) -> Dict[str, List[Path]]:
-        """Return copy of current stream → file path lists."""
-        return self._stream_to_paths.copy()
+            if mirror_path and mirror_threshold is not None:
+                if level_value >= mirror_threshold:
+                    paths.append(mirror_path)
+
+            self._paths_by_level[level_name] = paths
+
+    def get_paths_for_level(self, level: str) -> List[Path]:
+        """Return list of resolved paths for given level (sinks + mirror)."""
+        if level not in self._paths_by_level:
+            raise ValueError(f"Unknown log level: '{level}'")
+
+        return self._paths_by_level[level].copy()

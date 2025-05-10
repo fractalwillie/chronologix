@@ -2,22 +2,27 @@
 
 from pathlib import Path
 import asyncio
-from typing import List, Dict
+from typing import Iterable, Dict
 import os
 
 
-def prepare_directory(base_dir: Path, folder_name: str, log_streams: List[str]) -> Dict[str, Path]:
-    """Create log folder and check if .log files for all streams exist. Return stream → file path map."""
+def prepare_directory(base_dir: Path, folder_name: str, sink_names: Iterable[str]) -> Dict[str, Path]:
+    """
+    Create log folder and check if .log files for all sinks exist.
+    Return sink_name → full Path map.
+    """
+    # check if the log subdirs exists
     target_folder = base_dir / folder_name
     target_folder.mkdir(parents=True, exist_ok=True)
 
     path_map: Dict[str, Path] = {}
 
-    for stream in log_streams:
-        log_file = target_folder / f"{stream}.log"
+    for name in sink_names:
+        # touch each log file to make sure it exists
+        log_file = target_folder / name
         if not log_file.exists():
             log_file.touch(exist_ok=True)
-        path_map[stream] = log_file
+        path_map[name] = log_file
 
     return path_map
 
