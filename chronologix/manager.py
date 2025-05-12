@@ -1,5 +1,6 @@
 # manager.py
 
+import sys
 import asyncio
 import atexit
 from typing import List, Optional
@@ -83,6 +84,17 @@ class LogManager:
             self._pending_tasks.extend(tasks)
             self._pending_tasks = [t for t in self._pending_tasks if not t.done()] # remove completed tasks to avoid memory buildup
             await asyncio.gather(*tasks)
+
+        # echo to stdout/stderr if configured
+        if self._config.cli_stdout_threshold is not None or self._config.cli_stderr_threshold is not None:
+            level_value = LOG_LEVELS[level]
+
+            if self._config.cli_stderr_threshold is not None and level_value >= self._config.cli_stderr_threshold:
+                print(formatted_msg.strip(), file=sys.stderr)
+            elif self._config.cli_stdout_threshold is not None and level_value >= self._config.cli_stdout_threshold:
+                print(formatted_msg.strip(), file=sys.stdout)
+
+
 
     def __getattr__(self, level_name: str):
         """

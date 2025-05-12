@@ -17,6 +17,7 @@ It writes structured log files across multiple named sinks, supports time-based 
 -  Config validation with clear error feedback
 -  Custom log paths via `str` or `pathlib.Path`
 -  Predictable file and folder structure for automated processing
+-  Optional terminal output (stdout/stderr) with level filtering
 -  No logging module, no global state
 
 ---
@@ -47,6 +48,10 @@ config = LogConfig(
         "file": "audit.log",  # captures all messages regardless of sink
         "min_level": "NOTSET" # min_level for mirror is optional, defaults to NOTSET without it
     },
+    cli_echo={
+        "enabled": True,  # print all logs to terminal (stdout)
+        # optional: "min_level": "INFO" defaults to NOTSET if not specified
+    }
     timestamp_format="%H:%M:%S.%f"
 )
 
@@ -79,6 +84,7 @@ This example will produce following:
 - The exception will be logged to both sinks and mirror
 - Messages without level (like "Some NOTSET level msg") will be treated as NOTSET and only land in sinks that accept that level (here: audit.log mirror file)
 - Level filtering and routing is automatic. You don’t specify a target sink, only a level (or nothing)
+- All logs reflected in terminal through stdout
 
 ---
 
@@ -194,6 +200,38 @@ await logger.log("Something happened") # if no level is provided .log defaults t
 
 ---
 
+## Terminal output
+
+Chronologix can optionally echo log messages to your terminal.
+
+This can be useful during development or debugging when you want to see logs in real-time, while still keeping structured log files.
+
+You can configure this with the `cli_echo` option:
+
+### Simple format
+Print to stdout only:
+```python
+cli_echo = {
+    "enabled": True,
+    "min_level": "INFO"  # optional, defaults to NOTSET
+}
+```
+
+### Advanced format
+Split logs between stdout and stderr:
+```python
+cli_echo = {
+    "stdout": {"min_level": "INFO"},     # INFO and WARNING go to stdout
+    "stderr": {"min_level": "ERROR"}     # ERROR and CRITICAL go to stderr
+}
+```
+
+- You can use stdout/stderr individually, or both.
+- `stderr` takes precedence if a message qualifies for both.
+- If `enabled: False` or no config is provided, terminal output is disabled.
+
+---
+
 ## Timestamp formatting
 
 Customize timestamp formatting using any valid strftime directive.
@@ -248,6 +286,7 @@ LogConfig(
     }
     mirror=None,
     timestamp_format="%H:%M:%S"
+    cli_echo=None
 )
 ```
 

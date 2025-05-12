@@ -6,6 +6,33 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.4.0] - 2025-05-12
+### Added
+
+- Terminal output support via `cli_echo`
+
+    - Supports both simple and advanced formats
+
+    - Simple: `{"enabled": True, "min_level": "INFO"}`
+
+    - Advanced: `{"stdout": {"min_level": ...}, "stderr": {"min_level": ...}}`
+
+    - Routes messages to `stdout` or `stderr` based on severity
+
+    - Clean fallback: `stderr` takes precedence if message qualifies for both
+
+- Validation for misconfigured or incomplete `cli_echo` configs
+
+- Early skip optimization to avoid unnecessary CLI checks when disabled
+
+### Changed
+
+- README updated with new usage examples, explanation of terminal output, and default config changes
+
+- Added inline comments for clarity around new config and routing logic
+
+---
+
 ## [0.3.0] - 2025-05-10
 ### Changed
 

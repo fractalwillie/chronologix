@@ -49,6 +49,7 @@ class LogConfig:
     })
     mirror: Optional[Dict[str, str]] = None
     timestamp_format: str = "%H:%M:%S"
+    cli_echo: Optional[dict] = None
 
     # derived fields
     interval_timedelta: timedelta = field(init=False)
@@ -58,6 +59,8 @@ class LogConfig:
     sink_files: Dict[str, Path] = field(init=False)
     mirror_file: Optional[Path] = field(init=False)
     mirror_threshold: Optional[int] = field(init=False)
+    cli_stdout_threshold: Optional[int] = field(init=False, default=None)
+    cli_stderr_threshold: Optional[int] = field(init=False, default=None)
 
     def __post_init__(self):
         """Validate & compute derived config fields"""
@@ -120,3 +123,55 @@ class LogConfig:
         else:
             object.__setattr__(self, "mirror_file", None)
             object.__setattr__(self, "mirror_threshold", None)
+
+        # validate & normalize cli_echo
+        self._process_cli_echo()
+
+    def _process_cli_echo(self):
+        """Helper function to parse and normalize cli_echo config into separate thresholds for stdout and stderr"""
+        cli_echo = self.cli_echo
+        if not cli_echo:
+            object.__setattr__(self, "cli_stdout_threshold", None)
+            object.__setattr__(self, "cli_stderr_threshold", None)
+            return
+
+        def resolve_level(name: str) -> int:
+            """Convert level name to numeric severity"""
+            level = name.upper()
+            if level not in LOG_LEVELS:
+                raise LogConfigError(f"Invalid cli_echo min_level: '{level}' Must be one of {list(LOG_LEVELS.keys())}")
+            return LOG_LEVELS[level]
+
+        # simple format - {"enabled": True}
+        if "enabled" in cli_echo:
+            if not isinstance(cli_echo["enabled"], bool):
+                raise LogConfigError("cli_echo.enabled must be a boolean.")
+            if cli_echo["enabled"] is False:
+                object.__setattr__(self, "cli_stdout_threshold", None)
+                object.__setattr__(self, "cli_stderr_threshold", None)
+                return
+            level = resolve_level(cli_echo.get("min_level", "NOTSET"))
+            object.__setattr__(self, "cli_stdout_threshold", level)
+            object.__setattr__(self, "cli_stderr_threshold", None)
+            return
+
+        # advanced format - {"stdout": {...}, "stderr": {...}}
+        stdout = cli_echo.get("stdout")
+        stderr = cli_echo.get("stderr")
+
+        if stdout is None and stderr is None:
+            raise LogConfigError("cli_echo must define at least 'stdout' or 'stderr' block.")
+
+        if stdout:
+            if "min_level" not in stdout:
+                raise LogConfigError("cli_echo.stdout requires a 'min_level'")
+            object.__setattr__(self, "cli_stdout_threshold", resolve_level(stdout["min_level"]))
+        else:
+            object.__setattr__(self, "cli_stdout_threshold", None)
+
+        if stderr:
+            if "min_level" not in stderr:
+                raise LogConfigError("cli_echo.stderr requires a 'min_level'")
+            object.__setattr__(self, "cli_stderr_threshold", resolve_level(stderr["min_level"]))
+        else:
+            object.__setattr__(self, "cli_stderr_threshold", None)
