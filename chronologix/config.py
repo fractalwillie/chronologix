@@ -78,10 +78,38 @@ class LogConfig:
     cli_stderr_threshold: Optional[int] = field(init=False, default=None)
     retain_timedelta: Optional[timedelta] = field(init=False, default=None)
 
+
     def __post_init__(self):
         """Validate & compute derived config fields"""
 
         # validate that the interval is known and map it to its duration and folder naming format
+        self._validate_interval()
+
+        # validate that timestamp format includes at least one valid directive and can be used by strftime
+        self._validate_timestamp_format()
+
+        # validate that the base directory exists and is a valid path
+        self._validate_base_dir()
+
+        # resolve sink paths and log levels from user config
+        # validate each sink config (must include 'file' and 'min_level')
+        self._validate_sinks_and_levels()
+
+        # validate optional mirror config, resolve file and threshold level if provided
+        self._validate_mirror_config()
+
+        # validate & normalize cli_echo
+        self._validate_cli_echo()
+
+        # validate retain interval
+        self._validate_retain()
+
+        # validate output format, file type & create formats object
+        self._validate_sink_formats()
+
+
+    def _validate_interval(self):
+        """Validate that the interval is known and map it to its duration and folder naming format."""
         if self.interval not in INTERVAL_CONFIG:
             raise LogConfigError(f"Invalid interval: '{self.interval}'. Must be one of: {list(INTERVAL_CONFIG.keys())}")
 
@@ -89,7 +117,9 @@ class LogConfig:
         object.__setattr__(self, "interval_timedelta", config["timedelta"])
         object.__setattr__(self, "folder_format", config["folder_format"])
 
-        # validate that timestamp format includes at least one valid directive and can be used by strftime
+
+    def _validate_timestamp_format(self):
+        """Validate that timestamp format includes at least one valid directive and can be used by strftime."""
         if not any(code in self.timestamp_format for code in DIRECTIVE_CONFIG):
             raise LogConfigError(f"Invalid timestamp_format: '{self.timestamp_format}'. Must contain at least one valid strftime directive.")
 
@@ -98,18 +128,25 @@ class LogConfig:
         except Exception as e:
             raise LogConfigError(f"Invalid timestamp_format: {self.timestamp_format} — {e}")
 
-        # validate that the base directory exists and is a valid path
+
+    def _validate_base_dir(self):
+        """Validate that the base directory exists and is a valid path."""
         try:
             base = Path(self.base_log_dir).expanduser().resolve()
             base.mkdir(parents=True, exist_ok=True)
+            object.__setattr__(self, "resolved_base_path", base)
         except Exception as e:
             raise LogConfigError(f"Could not resolve or create base_log_dir: {e}")
-        object.__setattr__(self, "resolved_base_path", base)
+        
 
-        # resolve sink paths and log levels from user config
-        # validate each sink config (must include 'file' and 'min_level')
+    def _validate_sinks_and_levels(self):
+        """
+        Resolve sink paths and log levels from user config.
+        Validate each sink config (must include 'file' and 'min_level').
+        """
         resolved_sink_levels = {}
         resolved_sink_paths = {}
+        base = self.resolved_base_path
 
         for sink_name, cfg in self.sinks.items():
             if "file" not in cfg or "min_level" not in cfg:
@@ -124,32 +161,41 @@ class LogConfig:
         object.__setattr__(self, "sink_levels", resolved_sink_levels)
         object.__setattr__(self, "sink_files", resolved_sink_paths)
 
-        # validate optional mirror config, resolve file and threshold level if provided
+
+    def _validate_mirror_config(self):
+        """Validate optional mirror config, resolve file, threshold level, and format if provided"""
+        base = self.resolved_base_path
+
         if self.mirror is not None:
             if not isinstance(self.mirror, dict):
                 raise LogConfigError("Mirror must be a dictionary with 'file' and optional 'min_level'.")
             if "file" not in self.mirror:
                 raise LogConfigError("Mirror config must contain a 'file' key.")
+
             mirror_file = base / self.mirror["file"]
             mirror_level = self.mirror.get("min_level", "NOTSET").upper()
             if mirror_level not in LOG_LEVELS:
                 raise LogConfigError(f"Invalid mirror min_level: '{mirror_level}'")
+
             object.__setattr__(self, "mirror_file", mirror_file)
             object.__setattr__(self, "mirror_threshold", LOG_LEVELS[mirror_level])
+
+            mirror_format = self.mirror.get("format", "text").lower()
+            if mirror_format not in {"text", "json"}:
+                raise LogConfigError(f"Invalid format '{mirror_format}' for mirror. Must be 'text' or 'json'.")
+
+            ext = Path(self.mirror["file"]).suffix
+            if ext not in {".log", ".txt", ".json", ".jsonl"}:
+                raise LogConfigError(f"Unsupported file extension '{ext}' for mirror. Allowed: .log, .txt, .json, .jsonl")
+
+            object.__setattr__(self, "mirror_format", mirror_format)
         else:
             object.__setattr__(self, "mirror_file", None)
             object.__setattr__(self, "mirror_threshold", None)
+            object.__setattr__(self, "mirror_format", "text")
 
-        # validate & normalize cli_echo
-        self._process_cli_echo()
 
-        # validate retain interval
-        self._process_retain()
-
-        # validate output format, file type & create formats object
-        object.__setattr__(self, "sink_formats", self._process_sink_formats())
-
-    def _process_cli_echo(self):
+    def _validate_cli_echo(self):
         """Helper function to parse and normalize cli_echo config into separate thresholds for stdout and stderr"""
         cli_echo = self.cli_echo
         if not cli_echo:
@@ -199,7 +245,7 @@ class LogConfig:
             object.__setattr__(self, "cli_stderr_threshold", None)
 
 
-    def _process_retain(self):
+    def _validate_retain(self):
         """Validate the 'retain' config string and calculate its timedelta."""
         if self.retain is None:
             object.__setattr__(self, "retain_timedelta", None)
@@ -235,8 +281,8 @@ class LogConfig:
         object.__setattr__(self, "retain_timedelta", retain_td)
 
 
-    def _process_sink_formats(self) -> Dict[str, str]:
-        """Validate format key per sink and return sink_name → format map."""
+    def _validate_sink_formats(self):
+        """Validate and assign sink format per sink."""
         supported_formats = {"text", "json"}
         supported_extensions = {".log", ".txt", ".json", ".jsonl"}
         formats: Dict[str, str] = {}
@@ -252,4 +298,4 @@ class LogConfig:
 
             formats[sink_name] = format_value
 
-        return formats
+        object.__setattr__(self, "sink_formats", formats)

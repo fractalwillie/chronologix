@@ -6,6 +6,19 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.1] - 2025-05-13
+### Changed
+
+- Refactored `__post_init__()` in `config.py` into dedicated validation functions to satisfy my OCD
+    
+    - Improves code readability, structure, and navigation
+
+    - No changes to functionality or behavior
+
+    - The config module is now 50 lines longer and 500% more beautiful
+
+---
+
 ## [0.6.0] - 2025-05-13
 ### Added
 
