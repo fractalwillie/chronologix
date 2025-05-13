@@ -70,8 +70,10 @@ class LogConfig:
     resolved_base_path: Path = field(init=False)
     sink_levels: Dict[str, int] = field(init=False)
     sink_files: Dict[str, Path] = field(init=False)
+    sink_formats: Dict[str, str] = field(init=False)
     mirror_file: Optional[Path] = field(init=False)
     mirror_threshold: Optional[int] = field(init=False)
+    mirror_format: Optional[str] = field(init=False, default="text")
     cli_stdout_threshold: Optional[int] = field(init=False, default=None)
     cli_stderr_threshold: Optional[int] = field(init=False, default=None)
     retain_timedelta: Optional[timedelta] = field(init=False, default=None)
@@ -143,6 +145,9 @@ class LogConfig:
 
         # validate retain interval
         self._process_retain()
+
+        # validate output format, file type & create formats object
+        object.__setattr__(self, "sink_formats", self._process_sink_formats())
 
     def _process_cli_echo(self):
         """Helper function to parse and normalize cli_echo config into separate thresholds for stdout and stderr"""
@@ -228,3 +233,23 @@ class LogConfig:
             )
 
         object.__setattr__(self, "retain_timedelta", retain_td)
+
+
+    def _process_sink_formats(self) -> Dict[str, str]:
+        """Validate format key per sink and return sink_name → format map."""
+        supported_formats = {"text", "json"}
+        supported_extensions = {".log", ".txt", ".json", ".jsonl"}
+        formats: Dict[str, str] = {}
+
+        for sink_name, cfg in self.sinks.items():
+            format_value = cfg.get("format", "text").lower()
+            if format_value not in supported_formats:
+                raise LogConfigError(f"Invalid format '{format_value}' for sink '{sink_name}'. Must be one of {list(supported_formats)}")
+
+            ext = Path(cfg["file"]).suffix
+            if ext not in supported_extensions:
+                raise LogConfigError(f"Unsupported file extension '{ext}' for sink '{sink_name}'. Allowed: {list(supported_extensions)}")
+
+            formats[sink_name] = format_value
+
+        return formats

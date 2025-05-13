@@ -19,7 +19,8 @@ It writes structured log files across multiple named sinks, supports time-based 
 -  Predictable file and folder structure for automated processing
 -  Optional terminal output (stdout/stderr) with level filtering
 -  Optional time-based log deletion (retain policy)
--  No logging module, no global state
+-  Optional output format control (`text` or `json`) per sink/mirror
+-  Custom core, no dependance on Python's logging module, no global state
 
 ---
 
@@ -42,12 +43,13 @@ config = LogConfig(
     base_log_dir="my_logs",
     interval="1h",  # rollover every hour
     sinks={
-        "app": {"file": "app.log", "min_level": "INFO"}, # logs INFO and above into app.log file
-        "errors": {"file": "errors.log", "min_level": "ERROR"}, # logs ERROR and above into errors.log file
+        "app": {"file": "app.json", "min_level": "INFO", "format": "json"}, # logs INFO and above into app.json file
+        "errors": {"file": "errors.json", "min_level": "ERROR", "format": "json"}, # logs ERROR and above into errors.json file
     },
     mirror={
-        "file": "audit.log",  # captures all messages regardless of sink
-        "min_level": "NOTSET" # min_level for mirror is optional, defaults to NOTSET without it
+        "file": "audit.json",  # captures all messages regardless of sink
+        "min_level": "NOTSET", # optional: "min_level": "NOTSET" defaults to "NOTSET" if not specified
+        "format": "json" # optional: "format": "json" defaults to "text" if not specified
     },
     cli_echo={
         "enabled": True,  # print all logs to terminal (stdout)
@@ -82,9 +84,10 @@ async def main():
 ```
 This example will produce following:
 - Two new folder per hour like "2025-05-04__14-00/" and "2025-05-04__15-00/" inside my_logs/
-- Three log files inside each: app.log (INFO and above), errors.log (ERROR and above), audit.log (NOTSET)
+- Three log files inside each: app.json (INFO and above), errors.json (ERROR and above), audit.json (NOTSET)
+- All logs formatted as json objects - {"timestamp": "14:02:19:287248", "level": "INFO", "message": "Some msg"}
 - The exception will be logged to both sinks and mirror.
-- Messages without level (like "Some NOTSET level msg") will be treated as NOTSET and only land in sinks that accept that level (here: audit.log mirror file).
+- Messages without level (like "Some NOTSET level msg") will be treated as NOTSET and only land in sinks that accept that level (here: audit.json mirror file).
 - Level filtering and routing is automatic. You don’t specify a target sink, only a level (or nothing).
 - All logs reflected in terminal through stdout.
 - All subfolders inside my_logs/ are parsed on every rollover. Those older than 1 hour are deleted.
@@ -128,8 +131,9 @@ Each interval corresponds to a different granularity of time-based chunking:
 ## Sinks
 
 Each sink is defined by:
-- a `file` name (relative to the chunk folder)
-- a `min_level` that controls what gets written
+- a `file` name (relative to the chunk folder) and file extension (`.log`, `.txt`, `.json`, `.jsonl`)
+- a `min_level` that controls what gets written (`NOTSET`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`)
+- a `format` (`text` or `json`) that controls the output structure. It's optional and defaults to `text` when not included
 
 Example:
 ```python
@@ -150,6 +154,7 @@ You can configure an optional mirror file to capture all logs that match or exce
 mirror = {
     "file": "all.log",
     "min_level": "DEBUG"  # optional, defaults to "NOTSET"
+    "format": "text" # optional, defaults to "text" if not included, can be set to "json" for JSON output format
 }
 ```
 This is useful for debugging, auditing, or fallback catch-all logging.
@@ -190,6 +195,7 @@ await logger.DEBUG("msg") # DEBUG
 ```
 
 ### Using Chronologix without log levels
+
 If you don’t want log level filtering simply set your sink's `min_level` to `NOTSET`.
 
 Example:
@@ -200,6 +206,43 @@ sinks={
 
 await logger.log("Something happened") # if no level is provided .log defaults to NOTSET
 ```
+
+---
+
+## Log format & file extensions
+
+You can control the output format of each log file individually.
+
+Supported `format`:
+- `"text"` (default)
+- `"json"`
+
+Supported `file` extensions:
+- `.txt`
+- `.log`
+- `.json`
+- `.jsonl`
+
+To enable JSON output:
+```python
+sinks={
+    "debug": {"file": "debug.json", "min_level": "DEBUG", "format": "json"},
+},
+mirror={
+    "file": "all.json",
+    "format": "json"
+}
+```
+Each log message will then be written as a JSON object:
+```json
+{"timestamp": "14:02:19.123456", "level": "INFO", "message": "Some INFO level msg"}
+```
+
+- `format` is optional and defaults to `"text"` if not specified
+
+- `file` extension doesn't need to match `format` (e.g., you can have `debug.txt` in JSON `format`)
+
+- `cli_echo` always uses `text` format regardless of `format` settings
 
 ---
 

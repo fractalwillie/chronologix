@@ -9,7 +9,7 @@ from chronologix.config import LogConfig, LOG_LEVELS
 from chronologix.state import LogState
 from chronologix.rollover import RolloverScheduler
 from chronologix.io import prepare_directory, async_write
-from chronologix.utils import get_current_chunk_start
+from chronologix.utils import get_current_chunk_start, format_message
 
 
 class LogManager:
@@ -58,6 +58,7 @@ class LogManager:
         self._scheduler.start()
         self._started = True
 
+
     async def log(self, message: str, level: Optional[str] = None) -> None:
         """
         Write a timestamped log message to all sinks (and mirror) that accept the level.
@@ -72,27 +73,44 @@ class LogManager:
             raise ValueError(f"Invalid log level: '{level}'. Must be one of: {list(LOG_LEVELS)}")
 
         timestamp = datetime.now().strftime(self._config.timestamp_format)
-        formatted_msg = f"[{timestamp}] [{level}] {message}\n"
 
         # determine which log files should receive this message based on level routing
         paths = self._state.get_paths_for_level(level)
 
+        # Map path → format
+        format_map = {}
+        for sink_name, path in self._state._sink_paths.items():
+            if path in paths:
+                format_map[path] = self._config.sink_formats.get(sink_name, "text")
+
+        # if mirror is in use and path matches, assign default format
+        mirror_path = self._state._mirror_path
+        if mirror_path and mirror_path in paths:
+            format_map[mirror_path] = self._config.mirror_format or "text"
+
         # async handler with mutex to prevent concurrent writes to the same file
         # create and track async write tasks for all matching sinks
         async with self._lock:
-            tasks = [asyncio.create_task(async_write(p, formatted_msg)) for p in paths]
+            tasks = []
+            for path in paths:
+                fmt = format_map.get(path, "text")
+                msg = format_message(message, level, timestamp, fmt)
+                tasks.append(asyncio.create_task(async_write(path, msg)))
+
             self._pending_tasks.extend(tasks)
-            self._pending_tasks = [t for t in self._pending_tasks if not t.done()] # remove completed tasks to avoid memory buildup
+            self._pending_tasks = [t for t in self._pending_tasks if not t.done()]
             await asyncio.gather(*tasks)
 
         # echo to stdout/stderr if configured
         if self._config.cli_stdout_threshold is not None or self._config.cli_stderr_threshold is not None:
             level_value = LOG_LEVELS[level]
+            cli_msg = format_message(message, level, timestamp, "text").strip()
 
             if self._config.cli_stderr_threshold is not None and level_value >= self._config.cli_stderr_threshold:
-                print(formatted_msg.strip(), file=sys.stderr)
+                print(cli_msg, file=sys.stderr)
             elif self._config.cli_stdout_threshold is not None and level_value >= self._config.cli_stdout_threshold:
-                print(formatted_msg.strip(), file=sys.stdout)
+                print(cli_msg, file=sys.stdout)
+
 
 
 

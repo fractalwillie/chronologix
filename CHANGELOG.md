@@ -6,6 +6,32 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.0] - 2025-05-13
+### Added
+
+- New optional `format` key for both sinks and mirror
+
+    - Supports `"text"` (default) and `"json"`
+
+    - Per-sink granularity, some sinks can be `text`, others `json`
+
+    - `cli_echo` remains in plain text regardless of sink/mirror `format`
+
+    - `file` type extension (.log, .txt, .json, .jsonl) doesn't need to match `format`
+
+- Validation in config module:
+    - Unsupported `format` (e.g. `"csv"`)
+    - Incompatible file extensions
+    - Missing or misconfigured sink/mirror `format`
+
+### Changed
+
+- `cli_echo` logic adjusted to force formatting as `"text"` and to not be affected by sink or mirror config
+
+- Updated README to reflect the new format support
+
+---
+
 ## [0.5.0] - 2025-05-13
 ### Added
 
