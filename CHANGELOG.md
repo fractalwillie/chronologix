@@ -6,6 +6,35 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.0] - 2025-05-13
+### Added
+
+- Time-based log deletion via new cleanup.py module and `retain` config option
+
+    - Automatically removes old log folders based on defined retention interval
+
+    - Supports minutes (m), hours (h), days (d), and weeks (w)
+
+    - Configurable like `retain="1h"` or `retain="2d"`
+
+    - New derived field: `retain_timedelta`
+
+    - Cleanup runs after every rollover
+
+- Safeguard: `retain` must be equal to or longer than rollover `interval`
+
+    - Prevents accidental deletion of active log folders
+
+    - Raises a LogConfigError on misconfiguration
+
+### Changed
+
+- Updated README with full documentation of `retain`
+
+    - Added to Features list, Usage example, Time-based log deletion section, and Default config
+
+---
+
 ## [0.4.0] - 2025-05-12
 ### Added
 

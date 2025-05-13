@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chronologix"
-version = "0.4.0"
-description = "Fully async, modular logging system for Python with time-based rollover, multiple files handling, and log level filtering."
+version = "0.5.0"
+description = "Asynchronous, modular Python logger with time-based rollover, level filtering, multi-sink output, and more."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [

@@ -7,6 +7,7 @@ from chronologix.config import LogConfig
 from chronologix.state import LogState
 from chronologix.io import prepare_directory
 from chronologix.utils import get_current_chunk_start
+from chronologix.cleanup import run_cleanup
 
 
 class RolloverScheduler:
@@ -52,6 +53,9 @@ class RolloverScheduler:
                     sink_levels=self._config.sink_levels,
                     mirror_threshold=self._config.mirror_threshold
                 )
+
+                # run cleanup if configured
+                await run_cleanup(self._config)
 
                 # sleep until rollover
                 await asyncio.sleep(sleep_duration)

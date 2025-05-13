@@ -1,9 +1,10 @@
 # config.py
 
+import re
 from dataclasses import dataclass, field
 from datetime import timedelta, datetime
 from pathlib import Path
-from typing import Dict, Union, Optional, Any
+from typing import Dict, Union, Optional
 
 # custom exceptions
 class LogConfigError(Exception):
@@ -38,6 +39,17 @@ LOG_LEVELS = {
     "CRITICAL": 50
 }
 
+# regex for retain strings
+RETAIN_PATTERN = re.compile(r"^(\d+)([mhdw])$")
+
+# convert retain string to seconds
+_UNIT_TO_SECONDS = {
+    "m": 60,
+    "h": 3600,
+    "d": 86400,
+    "w": 604800
+}
+
 # Chronologix config
 @dataclass(frozen=True)
 class LogConfig:
@@ -50,6 +62,7 @@ class LogConfig:
     mirror: Optional[Dict[str, str]] = None
     timestamp_format: str = "%H:%M:%S"
     cli_echo: Optional[dict] = None
+    retain: Optional[str] = None
 
     # derived fields
     interval_timedelta: timedelta = field(init=False)
@@ -61,6 +74,7 @@ class LogConfig:
     mirror_threshold: Optional[int] = field(init=False)
     cli_stdout_threshold: Optional[int] = field(init=False, default=None)
     cli_stderr_threshold: Optional[int] = field(init=False, default=None)
+    retain_timedelta: Optional[timedelta] = field(init=False, default=None)
 
     def __post_init__(self):
         """Validate & compute derived config fields"""
@@ -127,6 +141,9 @@ class LogConfig:
         # validate & normalize cli_echo
         self._process_cli_echo()
 
+        # validate retain interval
+        self._process_retain()
+
     def _process_cli_echo(self):
         """Helper function to parse and normalize cli_echo config into separate thresholds for stdout and stderr"""
         cli_echo = self.cli_echo
@@ -175,3 +192,39 @@ class LogConfig:
             object.__setattr__(self, "cli_stderr_threshold", resolve_level(stderr["min_level"]))
         else:
             object.__setattr__(self, "cli_stderr_threshold", None)
+
+
+    def _process_retain(self):
+        """Validate the 'retain' config string and calculate its timedelta."""
+        if self.retain is None:
+            object.__setattr__(self, "retain_timedelta", None)
+            return
+
+        if not isinstance(self.retain, str):
+            raise LogConfigError("retain must be a string like '3d', '24h', or '1w'. Supported units: m, h, d, w.")
+
+        normalized = self.retain.strip().lower()
+
+        if not RETAIN_PATTERN.match(normalized):
+            raise LogConfigError(
+                f"Invalid retain interval: '{self.retain}'. "
+                "retain must be a string like '3d', '24h', or '1w'. Supported units: m, h, d, w."
+            )
+
+        def parse_retain_string(retain: str) -> timedelta:
+            """ Parse retain string into a timedelta."""
+            match = RETAIN_PATTERN.match(retain.strip().lower())
+            if not match:
+                raise ValueError(f"Invalid retain interval: '{retain}'. Supported units: m, h, d, w.")
+
+            value, unit = match.groups()
+            return timedelta(seconds=int(value) * _UNIT_TO_SECONDS[unit])
+
+        retain_td = parse_retain_string(self.retain)
+        if retain_td < self.interval_timedelta:
+            raise LogConfigError(
+                f"retain='{self.retain}' is shorter than the rollover interval '{self.interval}'. "
+                "Retention must be equal to or longer than the interval to avoid deleting active logs."
+            )
+
+        object.__setattr__(self, "retain_timedelta", retain_td)

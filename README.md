@@ -18,6 +18,7 @@ It writes structured log files across multiple named sinks, supports time-based 
 -  Custom log paths via `str` or `pathlib.Path`
 -  Predictable file and folder structure for automated processing
 -  Optional terminal output (stdout/stderr) with level filtering
+-  Optional time-based log deletion (retain policy)
 -  No logging module, no global state
 
 ---
@@ -41,8 +42,8 @@ config = LogConfig(
     base_log_dir="my_logs",
     interval="1h",  # rollover every hour
     sinks={
-        "app": {"file": "app.log", "min_level": "INFO"},
-        "errors": {"file": "errors.log", "min_level": "ERROR"},
+        "app": {"file": "app.log", "min_level": "INFO"}, # logs INFO and above into app.log file
+        "errors": {"file": "errors.log", "min_level": "ERROR"}, # logs ERROR and above into errors.log file
     },
     mirror={
         "file": "audit.log",  # captures all messages regardless of sink
@@ -53,6 +54,7 @@ config = LogConfig(
         # optional: "min_level": "INFO" defaults to NOTSET if not specified
     }
     timestamp_format="%H:%M:%S.%f"
+    retain="1h" # deletes log folders older than 1 hour
 )
 
 logger = LogManager(config)
@@ -79,18 +81,19 @@ async def main():
 
 ```
 This example will produce following:
-- Two new folder per hour like: 2025-05-04__14-00/ and 2025-05-04__15-00/
+- Two new folder per hour like "2025-05-04__14-00/" and "2025-05-04__15-00/" inside my_logs/
 - Three log files inside each: app.log (INFO and above), errors.log (ERROR and above), audit.log (NOTSET)
-- The exception will be logged to both sinks and mirror
-- Messages without level (like "Some NOTSET level msg") will be treated as NOTSET and only land in sinks that accept that level (here: audit.log mirror file)
-- Level filtering and routing is automatic. You don’t specify a target sink, only a level (or nothing)
-- All logs reflected in terminal through stdout
+- The exception will be logged to both sinks and mirror.
+- Messages without level (like "Some NOTSET level msg") will be treated as NOTSET and only land in sinks that accept that level (here: audit.log mirror file).
+- Level filtering and routing is automatic. You don’t specify a target sink, only a level (or nothing).
+- All logs reflected in terminal through stdout.
+- All subfolders inside my_logs/ are parsed on every rollover. Those older than 1 hour are deleted.
 
 ---
 
 ## Path structure
 
-You can set the log output directory using either a string path or a `pathlib.Path` object.
+You can set the log output folder using either a string path or a `pathlib.Path` object.
 
 Examples:
 ```python
@@ -98,7 +101,7 @@ LogConfig(base_log_dir="logs")  # relative to current working dir
 LogConfig(base_log_dir="/var/log/chronologix")  # absolute path (Linux)
 LogConfig(base_log_dir=Path("~/.chronologix").expanduser())  # user home dir
 ```
-Chronologix will create any missing directories automatically.
+Chronologix will create any missing folders automatically.
 
 ---
 
@@ -232,6 +235,30 @@ cli_echo = {
 
 ---
 
+## Time-based log deletion
+
+Automate log cleanup by setting `retain` parameter in LogConfig.
+
+Example:
+```python
+LogConfig(
+    retain="1h"
+)
+```
+The subfolders in which the logs are nested are parsed on every rollover, and those older than 1 hour are deleted.
+
+Supported time units:
+- `m` - minutes
+- `h` - hours
+- `d` - days
+- `w` - weeks
+
+`retain` is disabled in default config.
+
+**Important**: `retain` must be equal to or longer than the rollover `interval`.
+
+---
+
 ## Timestamp formatting
 
 Customize timestamp formatting using any valid strftime directive.
@@ -283,10 +310,11 @@ LogConfig(
     sinks={
         "debug": {"file": "debug.log", "min_level": "NOTSET"},
         "errors": {"file": "errors.log", "min_level": "ERROR"}
-    }
+    },
     mirror=None,
-    timestamp_format="%H:%M:%S"
-    cli_echo=None
+    timestamp_format="%H:%M:%S",
+    cli_echo=None,
+    retain=None
 )
 ```
 
