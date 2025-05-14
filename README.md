@@ -20,6 +20,7 @@ It writes structured log files across multiple named sinks, supports time-based 
 -  Optional terminal output (stdout/stderr) with level filtering
 -  Optional time-based log deletion (retain policy)
 -  Optional output format control (`text` or `json`) per sink/mirror
+-  Optional automatic log compression (`zip` or `tar.gz`) on every rollover
 -  Custom core, no dependance on Python's logging module, no global state
 
 ---
@@ -54,9 +55,13 @@ config = LogConfig(
     cli_echo={
         "enabled": True,  # print all logs to terminal (stdout)
         # optional: "min_level": "INFO" defaults to NOTSET if not specified
+    },
+    timestamp_format="%H:%M:%S.%f",
+    retain="1h", # deletes log folders older than 1 hour
+    compression={
+        "enabled": True,
+        "compress_format": "tar.gz"  # optional, defaults to "zip" if omitted
     }
-    timestamp_format="%H:%M:%S.%f"
-    retain="1h" # deletes log folders older than 1 hour
 )
 
 logger = LogManager(config)
@@ -91,6 +96,8 @@ This example will produce following:
 - Level filtering and routing is automatic. You don’t specify a target sink, only a level (or nothing).
 - All logs reflected in terminal through stdout.
 - All subfolders inside my_logs/ are parsed on every rollover. Those older than 1 hour are deleted.
+- The subfolder from the previous interval will be compressed into .tar.gz before cleanup on every rollover
+- Compressed archives are saved next to their original folder (e.g., 2025-05-04__14-00.zip)
 
 ---
 
@@ -298,7 +305,43 @@ Supported time units:
 
 `retain` is disabled in default config.
 
+If both compression and retention are configured, compression **always runs before** cleanup to avoid deleting subfolders mid-archive.
+
 **Important**: `retain` must be equal to or longer than the rollover `interval`.
+
+---
+
+## Log compression
+
+Automate compression of previous log subfolders after each rollover.
+Reduce disk usage without needing to implement your own compression logic.
+
+### Enabling compression
+
+To enable log compression, provide a `compression` config:
+```python
+compression={
+    "enabled": True  # enables compression using default format: zip
+}
+```
+Or specify a format:
+```python
+compression={
+    "enabled": True,
+    "compress_format": "tar.gz"  # or "zip"
+}
+```
+
+If you want to delete the original log subfolder after compression, configure `retain` with the same amount of time as the rollover `interval` (e.g. `interval="24h"` and `retain="1d"`).
+
+### Behavior
+
+- On every rollover, the subfolder from the previous time interval is compressed
+- Compression runs before log deletion (if `retain` is enabled)
+- Compressed archives are saved next to log folders (e.g. `2025-05-04__14-00.zip`)
+- Already-compressed folders are skipped on future rollovers
+- The current and next interval folders are never compressed
+- Compression supports both `.zip` and `.tar.gz` using Python’s built-in libraries
 
 ---
 
@@ -357,7 +400,8 @@ LogConfig(
     mirror=None,
     timestamp_format="%H:%M:%S",
     cli_echo=None,
-    retain=None
+    retain=None,
+    compression=None
 )
 ```
 

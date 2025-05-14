@@ -6,6 +6,29 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.0] - 2025-05-14
+### Added
+
+- New optional log compression system
+
+    - Compresses the *previous* time chunk subdir on every rollover
+
+    - Supports `"zip"` and `"tar.gz"` formats
+
+    - Configurable via new `compression` parameter in `LogConfig`
+
+    - Internal mutex added to prevent compression and cleanup from colliding
+
+- Validation in config module:
+    - Incompatible `compress_format` 
+    - Misconfigured `enabled` boolean
+
+### Changed
+
+- README updated with full documentation of compression feature
+
+---
+
 ## [0.6.1] - 2025-05-13
 ### Changed
 

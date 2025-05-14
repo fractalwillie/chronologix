@@ -8,6 +8,7 @@ from chronologix.state import LogState
 from chronologix.io import prepare_directory
 from chronologix.utils import get_current_chunk_start
 from chronologix.cleanup import run_cleanup
+from chronologix.compression import run_compression
 
 
 class RolloverScheduler:
@@ -16,6 +17,7 @@ class RolloverScheduler:
         self._config = config
         self._state = state
         self._running_task = None
+        self._lock = asyncio.Lock()
 
     def start(self) -> None:
         """Launch async rollover task."""
@@ -26,12 +28,11 @@ class RolloverScheduler:
         """Infinite loop that prepares new log directories and updates paths on interval."""
         try:
             while True:
-                # calculate the current and next chunk times, determine how long to sleep
+                # calculate the current and next chunk times
                 now = datetime.now()
                 interval_delta = self._config.interval_timedelta
                 current_chunk_start = get_current_chunk_start(now, interval_delta)
                 next_chunk_start = current_chunk_start + interval_delta
-                sleep_duration = (next_chunk_start - now).total_seconds()
 
                 # prepare dirs for current and next intervals
                 current_folder = current_chunk_start.strftime(self._config.folder_format)
@@ -54,10 +55,14 @@ class RolloverScheduler:
                     mirror_threshold=self._config.mirror_threshold
                 )
 
-                # run cleanup if configured
-                await run_cleanup(self._config)
+                # run compression and cleanup with lock to prevent deletion of active subdir during compression
+                async with self._lock:
+                    await run_compression(self._config)
+                    await run_cleanup(self._config)
 
-                # sleep until rollover
+                # recalculate time right before sleeping to prevent drift
+                now = datetime.now()
+                sleep_duration = (next_chunk_start - now).total_seconds()
                 await asyncio.sleep(sleep_duration)
 
         except asyncio.CancelledError:

@@ -55,6 +55,6 @@ class LogState:
     def get_paths_for_level(self, level: str) -> List[Path]:
         """Return list of resolved paths for given level (sinks + mirror)."""
         if level not in self._paths_by_level:
-            raise ValueError(f"[Chronologix] Unknown log level: '{level}'")
+            raise ValueError(f"Unknown log level: '{level}'")
 
         return self._paths_by_level[level].copy()

@@ -63,6 +63,7 @@ class LogConfig:
     timestamp_format: str = "%H:%M:%S"
     cli_echo: Optional[dict] = None
     retain: Optional[str] = None
+    compression: Optional[Dict[str, str]] = None
 
     # derived fields
     interval_timedelta: timedelta = field(init=False)
@@ -77,6 +78,7 @@ class LogConfig:
     cli_stdout_threshold: Optional[int] = field(init=False, default=None)
     cli_stderr_threshold: Optional[int] = field(init=False, default=None)
     retain_timedelta: Optional[timedelta] = field(init=False, default=None)
+    compression_format: Optional[str] = field(init=False, default=None)
 
 
     def __post_init__(self):
@@ -106,6 +108,9 @@ class LogConfig:
 
         # validate output format, file type & create formats object
         self._validate_sink_formats()
+
+        # validate compression config
+        self._validate_compression()
 
 
     def _validate_interval(self):
@@ -299,3 +304,29 @@ class LogConfig:
             formats[sink_name] = format_value
 
         object.__setattr__(self, "sink_formats", formats)
+
+
+    def _validate_compression(self):
+        """Validate compression config block and assign compression_format if enabled."""
+        if not self.compression:
+            object.__setattr__(self, "compression_format", None)
+            return
+
+        if not isinstance(self.compression, dict):
+            raise LogConfigError("compression must be a dictionary with 'enabled' boolean and optional 'compress_format'.")
+
+        enabled = self.compression.get("enabled", False)
+
+        if not isinstance(enabled, bool):
+            raise LogConfigError("compression.enabled must be a boolean.")
+
+        if not enabled:
+            object.__setattr__(self, "compression_format", None)
+            return
+
+        # If enabled, validate or assign compress_format
+        compress_format = self.compression.get("compress_format", "zip").lower()
+        if compress_format not in {"zip", "tar.gz"}:
+            raise LogConfigError("Invalid compress_format: must be either 'zip' or 'tar.gz'.")
+
+        object.__setattr__(self, "compression_format", compress_format)
