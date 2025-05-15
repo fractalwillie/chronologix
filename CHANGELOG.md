@@ -6,6 +6,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.1] - 2025-05-16
+### Fixed
+
+- Fixed `retain` feature which was unable to delete subfolders after the I/O overhaul
+
+    - `flush()` function in io.py module now properly closes file handles, frees them from memory and allows `run_cleanup()` to delete them
+
+---
+
 ## [0.8.0] - 2025-05-15
 ### Added
 

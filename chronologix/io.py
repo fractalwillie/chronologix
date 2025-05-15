@@ -120,8 +120,17 @@ class BufferedWriter:
 
     async def flush(self) -> None:
         """
-        Wait for all queued messages to be written and flush buffers to disk.
-        Used during rollovers to prevent cross-chunk writes.
+        Wait for all queued messages to be written, flush buffers to disk,
+        and close all file handles. Used during rollovers to prevent cross-chunk writes.
         """
         await self._queue.join()
-        self._flush_all()
+
+        for path, f in list(self._handles.items()):
+            try:
+                f.flush()
+                os.fsync(f.fileno())
+                f.close()
+            except Exception as e:
+                print(f"[Chronologix] Flush+Close error for {path}: {e}")
+            finally:
+                del self._handles[path]
