@@ -13,7 +13,7 @@ It writes structured log files across multiple named sinks, supports time-based 
 -  Multiple independent log sinks with custom filters
 -  Optional mirror sink that records everything above set threshold
 -  Log level filtering per sink (`DEBUG`, `ERROR`, etc.)
--  Safe file I/O with atomic disk writes
+-  Buffered file I/O with async batching and graceful failure handling
 -  Config validation with clear error feedback
 -  Custom log paths via `str` or `pathlib.Path`
 -  Predictable file and folder structure for automated processing
@@ -287,7 +287,7 @@ cli_echo = {
 
 ## Time-based log deletion
 
-Automate log cleanup by setting `retain` parameter in LogConfig.
+Automate log cleanup by configuring `retain` parameter in LogConfig.
 
 Example:
 ```python
@@ -314,11 +314,10 @@ If both compression and retention are configured, compression **always runs befo
 ## Log compression
 
 Automate compression of previous log subfolders after each rollover.
-Reduce disk usage without needing to implement your own compression logic.
 
 ### Enabling compression
 
-To enable log compression, provide a `compression` config:
+To enable log compression, configure the `compression` parameter in LogConfig:
 ```python
 compression={
     "enabled": True  # enables compression using default format: zip

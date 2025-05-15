@@ -5,6 +5,7 @@ import traceback
 from datetime import datetime
 from chronologix.config import LogConfig
 from chronologix.state import LogState
+from chronologix.io import BufferedWriter
 from chronologix.io import prepare_directory
 from chronologix.utils import get_current_chunk_start
 from chronologix.cleanup import run_cleanup
@@ -12,10 +13,11 @@ from chronologix.compression import run_compression
 
 
 class RolloverScheduler:
-    def __init__(self, config: LogConfig, state: LogState):
+    def __init__(self, config: LogConfig, state: LogState, writer: BufferedWriter):
         """Initialize rollover scheduler with config and mutable state reference."""
         self._config = config
         self._state = state
+        self._writer = writer
         self._running_task = None
         self._lock = asyncio.Lock()
 
@@ -46,6 +48,9 @@ class RolloverScheduler:
                 # prepare dirs
                 current_map = prepare_directory(self._config.resolved_base_path, current_folder, all_files)
                 prepare_directory(self._config.resolved_base_path, next_folder, all_files)
+
+                # flush any pending writes before updating state
+                await self._writer.flush()
 
                 # update internal state with current paths + level routing
                 self._state.update_active_paths(

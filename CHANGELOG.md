@@ -6,6 +6,40 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.0] - 2025-05-15
+### Added
+
+- Complete I/O subsystem overhaul
+
+    - Replaced open-write-close model with long-lived async buffered writer
+
+    - Messages are now queued and written in batches using a background task
+
+    - Buffered writer handles write(), flush(), fsync(), and close() with per-file exception handling
+
+    - Flush is enforced before rollover to prevent cross-chunk log overlap
+
+    - Handles missing or broken paths, future rollovers recover automatically
+
+    - atexit hook ensures flush on shutdown or crashes
+
+- Performance optimization
+
+    - Introduced coroutine memoization for logger.debug/info/warning/... methods
+
+    - Avoids rebuilding coroutines for each call
+
+### Performance Boost
+
+| Metric                   | v0.7.0       | v0.8.0         |
+| ------------------------ | ------------ | -------------- |
+| Single-thread throughput | \~5 msg/s    | \~9300 msg/s   |
+| Avg latency              | \~200–900 ms | \~0.10–0.45 ms |
+| Max latency              | >4 sec       | <1 sec         |
+
+
+---
+
 ## [0.7.0] - 2025-05-14
 ### Added
 
