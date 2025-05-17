@@ -6,6 +6,33 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.0] - 2025-05-17
+### Added
+
+- **Async Log Hooks** — optional user-defined functions triggered on every log event
+
+    - Supports coroutine-based handlers with optional `min_level` filtering
+
+    - Handlers receive the structured log object: `{timestamp, level, message}`
+
+    - Configured via new `hooks` parameter in `LogConfig`
+
+    - Multiple handlers can be registered
+
+    - Hooks are isolated, timeout-protected, and won't crash your app
+
+    - Some use cases: alerts, chatbots, real-time DB insertion, metrics 
+
+- Full validation for malformed or non-async hook functions
+
+- Timeout protection for long-running hooks (default: 5 seconds)
+
+### Changed
+
+- README updated with async log hooks documentation, including examples
+
+---
+
 ## [0.8.1] - 2025-05-16
 ### Fixed
 

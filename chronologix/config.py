@@ -4,7 +4,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import timedelta, datetime
 from pathlib import Path
-from typing import Dict, Union, Optional
+from typing import Dict, Union, Optional, List
+from inspect import iscoroutinefunction
+from chronologix.hooks import HookHandler
 
 # custom exceptions
 class LogConfigError(Exception):
@@ -64,6 +66,7 @@ class LogConfig:
     cli_echo: Optional[dict] = None
     retain: Optional[str] = None
     compression: Optional[Dict[str, str]] = None
+    hooks: Optional[Dict[str, list]] = None
 
     # derived fields
     interval_timedelta: timedelta = field(init=False)
@@ -79,6 +82,7 @@ class LogConfig:
     cli_stderr_threshold: Optional[int] = field(init=False, default=None)
     retain_timedelta: Optional[timedelta] = field(init=False, default=None)
     compression_format: Optional[str] = field(init=False, default=None)
+    hook_handlers: List["HookHandler"] = field(init=False, default_factory=list)
 
 
     def __post_init__(self):
@@ -111,6 +115,10 @@ class LogConfig:
 
         # validate compression config
         self._validate_compression()
+
+        # validate hooks config and functions being passed to it
+        self._validate_hooks()
+
 
 
     def _validate_interval(self):
@@ -330,3 +338,34 @@ class LogConfig:
             raise LogConfigError("Invalid compress_format: must be either 'zip' or 'tar.gz'.")
 
         object.__setattr__(self, "compression_format", compress_format)
+
+
+    def _validate_hooks(self):
+        """Validate and normalize hooks config into HookHandler objects."""
+        raw_hooks = getattr(self, "hooks", None)
+
+        if not raw_hooks or not isinstance(raw_hooks, dict):
+            object.__setattr__(self, "hook_handlers", [])
+            return
+
+        raw_handlers = raw_hooks.get("handlers", [])
+        if not isinstance(raw_handlers, list):
+            raise LogConfigError("hooks.handlers must be a list of coroutine functions or dicts with 'func'.")
+
+        parsed_hooks = []
+
+        for idx, entry in enumerate(raw_handlers):
+            if iscoroutinefunction(entry):
+                parsed_hooks.append(HookHandler(threshold=0, func=entry))
+            elif isinstance(entry, dict):
+                func = entry.get("func")
+                if not iscoroutinefunction(func):
+                    raise LogConfigError(f"Hook entry {idx} has non-async func.")
+                level = entry.get("min_level", "NOTSET").upper()
+                if level not in LOG_LEVELS:
+                    raise LogConfigError(f"Hook entry {idx} has invalid min_level: '{level}'")
+                parsed_hooks.append(HookHandler(threshold=LOG_LEVELS[level], func=func))
+            else:
+                raise LogConfigError(f"Hook entry {idx} must be a coroutine or a dict with 'func'.")
+
+        object.__setattr__(self, "hook_handlers", parsed_hooks)

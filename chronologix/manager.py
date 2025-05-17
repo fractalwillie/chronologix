@@ -10,6 +10,7 @@ from chronologix.state import LogState
 from chronologix.rollover import RolloverScheduler
 from chronologix.io import prepare_directory, BufferedWriter
 from chronologix.utils import get_current_chunk_start, format_message
+from chronologix.hooks import dispatch_hooks
 
 
 class LogManager:
@@ -74,6 +75,8 @@ class LogManager:
         if level not in LOG_LEVELS:
             raise ValueError(f"Invalid log level: '{level}'. Must be one of: {list(LOG_LEVELS)}")
 
+        level_value = LOG_LEVELS[level]
+
         timestamp = datetime.now().strftime(self._config.timestamp_format)
 
         # determine which log files should receive this message based on level routing
@@ -97,9 +100,17 @@ class LogManager:
             msg = format_message(message, level, timestamp, fmt)
             await self._writer.write(path, msg)
 
+        # hook dispatch (non-blocking, isolated)
+        if self._config.hook_handlers:
+            log_dict = {
+                "timestamp": timestamp,
+                "level": level,
+                "message": message
+            }
+            await dispatch_hooks(log_dict, level_value, self._config.hook_handlers)
+
         # echo to stdout/stderr if configured
         if self._config.cli_stdout_threshold is not None or self._config.cli_stderr_threshold is not None:
-            level_value = LOG_LEVELS[level]
             cli_msg = format_message(message, level, timestamp, "text").strip()
 
             if self._config.cli_stderr_threshold is not None and level_value >= self._config.cli_stderr_threshold:
@@ -129,6 +140,7 @@ class LogManager:
         """Stop rollover and I/O loops."""
         await self._scheduler.stop()
         await self._writer.stop()
+
 
     def _on_exit(self) -> None:
         """Handle atexit shutdown by awaiting pending cleanup if event loop is running."""

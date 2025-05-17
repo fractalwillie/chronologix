@@ -21,6 +21,7 @@ It writes structured log files across multiple named sinks, supports time-based 
 -  Optional time-based log deletion (retain policy)
 -  Optional output format control (`text` or `json`) per sink/mirror
 -  Optional automatic log compression (`zip` or `tar.gz`) on every rollover
+-  Optional async log hooks for custom alerts, event tracking, or anything else you need
 -  Custom core, no dependance on Python's logging module, no global state
 
 ---
@@ -61,10 +62,20 @@ config = LogConfig(
     compression={
         "enabled": True,
         "compress_format": "tar.gz"  # optional, defaults to "zip" if omitted
+    },
+    hooks={
+        "handlers": [
+            {"func": some_hook_function, "min_level": "CRITICAL"}
+        ]
     }
 )
 
 logger = LogManager(config)
+
+# async log hook function (can be anything, database insertion, chat message etc.)
+async def some_hook_function(log):
+    print(f"[Hook] Critical Error detected:" log["timestamp"] - log["level"] - log["message"])
+
 
 async def divide(a, b):
     try:
@@ -98,6 +109,7 @@ This example will produce following:
 - All subfolders inside my_logs/ are parsed on every rollover. Those older than 1 hour are deleted.
 - The subfolder from the previous interval will be compressed into .tar.gz before cleanup on every rollover
 - Compressed archives are saved next to their original folder (e.g., 2025-05-04__14-00.zip)
+- `some_hook_function(log)` prints the critical error based on the `min_level` set in hooks config
 
 ---
 
@@ -213,6 +225,69 @@ sinks={
 
 await logger.log("Something happened") # if no level is provided .log defaults to NOTSET
 ```
+
+---
+
+## Async Log Hooks
+
+Chronologix supports optional async hooks that run custom code whenever a new log message is processed.
+
+You can use this to:
+- Trigger alerts (e.g., notify on CRITICAL logs)
+- Forward logs to external services (e.g., HTTP, chatbots)
+- Store logs in a database
+- And much more
+
+Example:
+```python
+async def telegram_hook(log: dict):
+    time = log["timestamp"]
+    level = log["level"]
+    msg = log["message"]
+    
+    message = f"{time} - {level} - {msg}"
+    payload = {
+        "chat_id": TG_GROUP_ID,
+        "text": message
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"https://api.telegram.org/bot{TG_BOT}/sendMessage", json=payload
+            ) as resp:
+                if resp.status != 200:
+                    print(f"[HOOK] Failed to send message to Telegram: {resp.status}")
+    except Exception as e:
+        print(f"[HOOK] Telegram hook exception: {e}")
+
+config = LogConfig(
+    ...
+    hooks={
+        "handlers": [telegram_hook]  # you can add multiple functions
+    }
+)
+```
+
+Each handler must be an async function and receives a dict like:
+```python
+{
+    "timestamp": "14:01:32.120013",
+    "level": "CRITICAL",
+    "message": "Something bad happened"
+}
+```
+
+You can also provide level filtering per hook:
+```python
+hooks={
+    "handlers": [
+        {"func": telegram_hook, "min_level": "ERROR"}
+    ]
+}
+```
+
+Hooks run in isolation and will never crash your logger. Exceptions are caught and printed to stderr.
 
 ---
 
@@ -400,7 +475,8 @@ LogConfig(
     timestamp_format="%H:%M:%S",
     cli_echo=None,
     retain=None,
-    compression=None
+    compression=None,
+    hooks=None
 )
 ```
 
