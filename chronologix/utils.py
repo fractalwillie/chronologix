@@ -3,11 +3,15 @@
 from datetime import datetime, timedelta
 import json
 
-def get_current_chunk_start(now: datetime, interval_delta: timedelta) -> datetime:
-    """Return start datetime of the current chunk based on interval delta."""
-    total_seconds = int((now - datetime.min).total_seconds()) # align current time to nearest lower interval boundary
-    aligned_seconds = (total_seconds // int(interval_delta.total_seconds())) * int(interval_delta.total_seconds())
-    return datetime.min + timedelta(seconds=aligned_seconds)
+def floor_time(ts: datetime, delta: timedelta) -> datetime:
+    """Return ts floored to a multiple of delta since Unix epoch, respecting local tz."""
+    if ts.tzinfo is None:
+        raise ValueError("Input datetime must be timezone-aware")
+
+    epoch = datetime(1970, 1, 1, tzinfo=ts.tzinfo)
+    seconds = int((ts - epoch).total_seconds())
+    return epoch + timedelta(seconds=(seconds // int(delta.total_seconds())) * int(delta.total_seconds()))
+
 
 def format_message(message: str, level: str, timestamp: str, format: str) -> str:
     """Format message based on the format config."""

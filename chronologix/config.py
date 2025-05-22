@@ -3,6 +3,7 @@
 import re
 from dataclasses import dataclass, field
 from datetime import timedelta, datetime
+from zoneinfo import ZoneInfo, available_timezones
 from pathlib import Path
 from typing import Dict, Union, Optional, List
 from inspect import iscoroutinefunction
@@ -67,6 +68,7 @@ class LogConfig:
     retain: Optional[str] = None
     compression: Optional[Dict[str, str]] = None
     hooks: Optional[Dict[str, list]] = None
+    timezone: str = "UTC"
 
     # derived fields
     interval_timedelta: timedelta = field(init=False)
@@ -83,6 +85,7 @@ class LogConfig:
     retain_timedelta: Optional[timedelta] = field(init=False, default=None)
     compression_format: Optional[str] = field(init=False, default=None)
     hook_handlers: List["HookHandler"] = field(init=False, default_factory=list)
+    resolved_tz: ZoneInfo = field(init=False)
 
 
     def __post_init__(self):
@@ -119,6 +122,8 @@ class LogConfig:
         # validate hooks config and functions being passed to it
         self._validate_hooks()
 
+        # validate timezone config
+        self._validate_timezone() 
 
 
     def _validate_interval(self):
@@ -369,3 +374,15 @@ class LogConfig:
                 raise LogConfigError(f"Hook entry {idx} must be a coroutine or a dict with 'func'.")
 
         object.__setattr__(self, "hook_handlers", parsed_hooks)
+
+
+    def _validate_timezone(self):
+        """Validate and resolve timezone string into ZoneInfo object."""
+        try:
+            tz = ZoneInfo(self.timezone)
+            object.__setattr__(self, "resolved_tz", tz)
+        except Exception:
+            valid = sorted(available_timezones())
+            raise LogConfigError(
+                f"Invalid timezone: '{self.timezone}'. Must be a valid IANA zone name: {valid}"
+            )

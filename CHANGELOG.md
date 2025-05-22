@@ -6,6 +6,41 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.10.0] - 2025-05-23
+### Added
+
+- **Timezone Support**  
+    - New `timezone` config option allows users to align all timestamps and folder names to a specific timezone  
+    - Defaults to `"UTC"` if not provided  
+    - Powered by Python 3.9+ `zoneinfo` module  
+    - Raises a clear error on invalid timezone names
+
+- **Internal Sink Logging**  
+    - Chronologix now writes internal diagnostic logs to `chronologix_internal.log` inside each chunk folder  
+    - Useful for debugging rollover, compression, and cleanup behavior  
+    - Automatically created and updated
+
+- **Drift-Resistant Rollover Loop**  
+    - Rollover is now based on monotonic time with tolerance for wakeup drift  
+    - Fixes rare rollover timing bugs when the system is under load, VM suspends etc.
+
+### Changed
+
+- **Rollover Module Refactor**  
+    - Time math now respects `zoneinfo` fully  
+    - Compression and cleanup are aware of timezones as well
+
+- **Error Surfacing Improvements**  
+    - All config-related errors now raise **on startup only**  
+    - Chronologix will never crash your app at runtime due to misconfigurations
+
+- **Minimum Python Requirement**  
+    - Raised to `>=3.9` due to new timezone handling (`zoneinfo` support)
+
+- **README** updated with timezone config section, including examples
+
+---
+
 ## [0.9.0] - 2025-05-17
 ### Added
 

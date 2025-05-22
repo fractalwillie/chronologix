@@ -22,6 +22,7 @@ It writes structured log files across multiple named sinks, supports time-based 
 -  Optional output format control (`text` or `json`) per sink/mirror
 -  Optional automatic log compression (`zip` or `tar.gz`) on every rollover
 -  Optional async log hooks for custom alerts, event tracking, or anything else you need
+-  Optional timezone alignment for chunk folders and timestamps
 -  Custom core, no dependance on Python's logging module, no global state
 
 ---
@@ -67,7 +68,8 @@ config = LogConfig(
         "handlers": [
             {"func": some_hook_function, "min_level": "CRITICAL"}
         ]
-    }
+    },
+    timezone="Europe/Prague"
 )
 
 logger = LogManager(config)
@@ -110,6 +112,7 @@ This example will produce following:
 - The subfolder from the previous interval will be compressed into .tar.gz before cleanup on every rollover
 - Compressed archives are saved next to their original folder (e.g., 2025-05-04__14-00.zip)
 - `some_hook_function(log)` prints the critical error based on the `min_level` set in hooks config
+- Folder rollover times, names, and timestamps in logs reflect Europe/Prague timezone 
 
 ---
 
@@ -435,6 +438,39 @@ Invalid formats are rejected with a descriptive LogConfigError.
 
 ---
 
+## Timezone support
+
+By default, all timestamps and folder names are based on **UTC**.
+
+You can optionally set a custom timezone using the `timezone` parameter in `LogConfig`.
+
+Chronologix uses Python's built-in [zoneinfo](https://docs.python.org/3/library/zoneinfo.html) module for timezone resolution. This requires **Python 3.9+**.
+
+Example:
+```python
+LogConfig(
+    ...
+    timezone="Europe/Prague"
+)
+```
+
+Supported values are standard IANA zone names like:
+- "Europe/Prague"
+- "America/New_York"
+- "Asia/Tokyo"
+- "Etc/GMT+2"
+
+If the timezone is invalid, a `LogConfigError` will be raised on startup with a list of valid options.
+
+### Behavior
+
+- Folder rollover times and names reflect the selected timezone
+- Timestamps in log entries are aligned to the specified timezone
+- All time-based operations (retain, compression, etc.) are now fully timezone-aware
+- If no timezone is provided, Chronologix defaults to "UTC"
+
+---
+
 ## Log structure
 
 ```lua
@@ -476,7 +512,8 @@ LogConfig(
     cli_echo=None,
     retain=None,
     compression=None,
-    hooks=None
+    hooks=None,
+    timezone="UTC"
 )
 ```
 

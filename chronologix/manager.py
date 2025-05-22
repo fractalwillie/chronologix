@@ -9,8 +9,9 @@ from chronologix.config import LogConfig, LOG_LEVELS
 from chronologix.state import LogState
 from chronologix.rollover import RolloverScheduler
 from chronologix.io import prepare_directory, BufferedWriter
-from chronologix.utils import get_current_chunk_start, format_message
+from chronologix.utils import floor_time, format_message
 from chronologix.hooks import dispatch_hooks
+from chronologix.errors import set_internal_log_path, INTERNAL_LOG_FILE
 
 
 class LogManager:
@@ -37,17 +38,25 @@ class LogManager:
             return
 
         # determine the current chunk (log folder) name based on interval alignment
-        now = datetime.now()
+        now = datetime.now(self._config.resolved_tz)
         interval_delta = self._config.interval_timedelta
-        chunk_name = get_current_chunk_start(now, interval_delta).strftime(self._config.folder_format)
+        chunk_name = floor_time(now, interval_delta).strftime(self._config.folder_format)
 
         # collect unique filenames across all sinks (and optional mirror) to prepare directory
         all_files = {p.name for p in self._config.sink_files.values()}
         if self._config.mirror_file:
             all_files.add(self._config.mirror_file.name)
 
+        # add internal log file
+        all_files.add(INTERNAL_LOG_FILE)
+
         # prepare the current log directory and create all required files
         current_map = prepare_directory(self._config.resolved_base_path, chunk_name, all_files)
+
+        # set path to internal sink
+        internal_path = current_map.get(INTERNAL_LOG_FILE)
+        if internal_path:
+            set_internal_log_path(internal_path)
 
         # register file paths and levels into shared log state
         self._state.update_active_paths(
@@ -77,7 +86,7 @@ class LogManager:
 
         level_value = LOG_LEVELS[level]
 
-        timestamp = datetime.now().strftime(self._config.timestamp_format)
+        timestamp = datetime.now(self._config.resolved_tz).strftime(self._config.timestamp_format)
 
         # determine which log files should receive this message based on level routing
         paths = self._state.get_paths_for_level(level)

@@ -1,9 +1,9 @@
 # hooks.py
 
 import asyncio
-import sys
 from dataclasses import dataclass
 from typing import Callable, Awaitable, List
+from chronologix.errors import internal_log
 
 @dataclass
 class HookHandler:
@@ -34,4 +34,4 @@ async def dispatch_hooks(log_dict: dict, level_value: int, handlers: List[HookHa
     for hook, result in zip(handlers, results):
         if isinstance(result, Exception):
             hook_name = getattr(hook.func, "__name__", repr(hook.func))
-            print(f"[Chronologix] Hook '{hook_name}' failed: {result}", file=sys.stderr)
+            internal_log(f"Hook '{hook_name}' failed: {result}")

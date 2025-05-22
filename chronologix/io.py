@@ -5,6 +5,7 @@ import io
 import os
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
+from chronologix.errors import internal_log
 
 
 def prepare_directory(base_dir: Path, folder_name: str, sink_names: Iterable[str]) -> Dict[str, Path]:
@@ -72,7 +73,7 @@ class BufferedWriter:
                     os.fsync(f.fileno())
                     f.close()
                 except Exception as e:
-                    print(f"[Chronologix] Close error for {path}: {e}")
+                    internal_log(f"Close error for {path}: {e}")
 
 
 
@@ -95,14 +96,14 @@ class BufferedWriter:
                         fh = open(path, "a", encoding="utf-8")
                         self._handles[path] = fh
                     except Exception as e:
-                        print(f"[Chronologix] Failed to open log file {path}: {e}")
+                        internal_log(f"Failed to open log file {path}: {e}")
                         self._queue.task_done()
                         continue
 
                 try:
                     fh.write(txt)
                 except Exception as e:
-                    print(f"[Chronologix] Write error for {path}: {e}")
+                    internal_log(f"Write error for {path}: {e}")
                 finally:
                     self._queue.task_done()
         finally:
@@ -115,7 +116,7 @@ class BufferedWriter:
             try:
                 f.flush()
             except Exception as e:
-                print(f"[Chronologix] Flush error for {path}: {e}")
+                internal_log(f"Flush error for {path}: {e}")
 
 
     async def flush(self) -> None:
@@ -131,6 +132,7 @@ class BufferedWriter:
                 os.fsync(f.fileno())
                 f.close()
             except Exception as e:
-                print(f"[Chronologix] Flush+Close error for {path}: {e}")
+                internal_log(f"Flush+Close error for {path}: {e}")
             finally:
                 del self._handles[path]
+

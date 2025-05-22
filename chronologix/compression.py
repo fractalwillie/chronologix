@@ -3,17 +3,18 @@
 import tarfile
 import zipfile
 from pathlib import Path
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
+from chronologix.utils import floor_time
 from chronologix.config import LogConfig
+from chronologix.errors import internal_log
 
 
-def _get_previous_chunk_name(folder_format: str, interval_td: timedelta) -> str:
+def _get_previous_chunk_name(folder_format: str, interval_td: timedelta, resolved_tz: timezone) -> str:
     """Return the previous chunk's folder name based on current time and interval."""
-    now = datetime.now()
-    total_seconds = int((now - datetime.min).total_seconds())
-    aligned = (total_seconds // int(interval_td.total_seconds())) * int(interval_td.total_seconds())
-    previous_start = datetime.min + timedelta(seconds=aligned - int(interval_td.total_seconds()))
-    return previous_start.strftime(folder_format)
+    now = datetime.now(resolved_tz)
+    aligned = floor_time(now, interval_td)
+    previous = aligned - interval_td
+    return previous.strftime(folder_format)
 
 
 async def run_compression(config: LogConfig) -> None:
@@ -25,7 +26,7 @@ async def run_compression(config: LogConfig) -> None:
         return  # compression is disabled
 
     base_dir = config.resolved_base_path
-    previous_chunk_name = _get_previous_chunk_name(config.folder_format, config.interval_timedelta)
+    previous_chunk_name = _get_previous_chunk_name(config.folder_format, config.interval_timedelta, config.resolved_tz)
     subdir_path = base_dir / previous_chunk_name
 
     if not subdir_path.is_dir():
@@ -45,7 +46,7 @@ async def run_compression(config: LogConfig) -> None:
         else:
             raise ValueError(f"Unsupported compression format: {config.compression_format}")
     except Exception as e:
-        print(f"[Chronologix] Compression failed for {subdir_path.name}: {e}")
+        internal_log(f"Compression failed for {subdir_path.name}: {e}")
 
 
 def _compress_zip(source_dir: Path, dest_path: Path) -> None:
